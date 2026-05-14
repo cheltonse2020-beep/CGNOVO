@@ -35,11 +35,18 @@ btnStart.addEventListener('click', () => {
     dayNightCycle: 0,
     collisions: 0,
     isJumping: false,
-    jumpPower: 0
+    jumpVelocity: 0,
+    jumpsAvailable: 3
   };
   enemyCars = [];
   obstacles = [];
   powerUps = [];
+  jumpPickups = [];
+  pedestrians = [];
+  policeCars = [];
+  policeConvoyActive = false;
+  policeConvoyTimer  = 0;
+  nextPoliceEventTime = 45;
   headlightSpots = [];
   isGameOver = false;
   initScene();
@@ -76,7 +83,8 @@ let gameState = {
   dayNightCycle: 0,
   collisions: 0,
   isJumping: false,
-  jumpPower: 0
+  jumpVelocity: 0,
+  jumpsAvailable: 3
 };
 
 // ── Lane system ──────────────────────────────────────────────
@@ -87,6 +95,12 @@ let enemyCars = [];       // replaces old trafficCars
 let trafficSpawnTimer = 0;// countdown between wave spawns
 let obstacles = [];
 let powerUps = [];
+let jumpPickups = [];
+let pedestrians = [];
+let policeCars         = [];
+let policeConvoyActive = false;
+let policeConvoyTimer  = 0;
+let nextPoliceEventTime = 45;  // first convoy fires at 45 s of play time
 let scene, camera, renderer, playerCar, clock;
 let isGameOver = false;   // stops the update logic when true
 let headlightSpots = [];  // [leftSpotLight, rightSpotLight] for the player car
@@ -173,6 +187,7 @@ function initScene() {
   buildRoad(scene);
   playerCar = buildCar(scene);
   buildScenery(scene);
+  spawnPedestrians();
 
   // Collect the player car's SpotLights for headlight mode control
   playerCar.traverse(child => {
@@ -186,7 +201,11 @@ function initScene() {
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (e.code === 'Escape') returnToMenu();
-    if (e.code === 'Space') gameState.isJumping = true;
+    if (e.code === 'Space' && !gameState.isJumping && gameState.jumpsAvailable > 0) {
+      gameState.isJumping = true;
+      gameState.jumpVelocity = 0.28;
+      gameState.jumpsAvailable--;
+    }
     if (e.code === 'KeyN' && gameState.nitroCharge > 20) gameState.nitroActive = true;
     // Headlight modes
     if (e.code === 'Digit1') setHeadlightMode('minimo');
@@ -203,7 +222,6 @@ function initScene() {
   });
   window.addEventListener('keyup', e => {
     keys[e.code] = false;
-    if (e.code === 'Space') gameState.isJumping = false;
     if (e.code === 'KeyN') gameState.nitroActive = false;
   });
 
@@ -220,6 +238,7 @@ function initScene() {
         <div>LEVEL: <span id="level-value">1</span></div>
         <div>OVERTAKES: <span id="overtakes-value">0</span></div>
         <div>NITRO: <span id="nitro-bar">████</span> <span id="nitro-value">100%</span></div>
+        <div style="color:#00ffff;">JUMPS: <span id="jumps-value">3/3</span></div>
         <div id="headlight-mode" style="color:#ffff88;">FAROL: OFF</div>
         <div id="time-display">TIME: DAY ☀️</div>
       </div>
@@ -344,16 +363,28 @@ function initScene() {
     }
     gameState.nitroCharge = THREE.MathUtils.clamp(gameState.nitroCharge, 0, 100);
 
-    // -- Jump mechanic ----
-    // Car group origin is at road level (y = 0), so resting y = 0
-    if (gameState.isJumping && gameState.currentVelocity > 12) {
-      gameState.jumpPower = Math.min(gameState.jumpPower + 15 * delta, 2);
-      playerCar.position.y = gameState.jumpPower;
-    } else if (gameState.jumpPower > 0) {
-      gameState.jumpPower = Math.max(gameState.jumpPower - 12 * delta, 0);
-      playerCar.position.y = gameState.jumpPower;
+    // -- Jump mechanic (impulse + gravity, arcade style) ----------
+    const groundY = 0;
+    if (gameState.isJumping) {
+      // Apply velocity and gravity (frame-rate independent, tuned for 60fps feel)
+      playerCar.position.y += gameState.jumpVelocity * 60 * delta;
+      gameState.jumpVelocity -= 0.9 * delta; // gravity ≈ 0.015 per frame @ 60fps
+
+      // Visual pitch: tilt back on rise, nose-down on fall
+      const targetPitch = gameState.jumpVelocity > 0 ? -0.12 : 0.07;
+      playerCar.rotation.x = THREE.MathUtils.lerp(playerCar.rotation.x, targetPitch, 0.15);
+
+      // Landing
+      if (playerCar.position.y <= groundY) {
+        playerCar.position.y = groundY;
+        gameState.isJumping   = false;
+        gameState.jumpVelocity = 0;
+        playerCar.rotation.x  = 0.12; // brief forward impact tilt
+      }
     } else {
-      playerCar.position.y = 0;
+      playerCar.position.y = groundY;
+      // Smoothly recover rotation after landing
+      playerCar.rotation.x = THREE.MathUtils.lerp(playerCar.rotation.x, 0, 0.2);
     }
 
     // -- Steering (only left/right) ----
@@ -397,6 +428,14 @@ function initScene() {
     updateEnemyCars(delta);
     updateObstacles(delta);
     updatePowerUps(delta);
+    updateJumpPickups(delta);
+    updatePedestrians(delta);
+    updatePoliceConvoy(delta);
+
+    // -- Police convoy trigger (time-based) ----
+    if (!policeConvoyActive && gameState.time >= nextPoliceEventTime) {
+      startPoliceConvoyEvent();
+    }
 
     // -- Traffic wave spawn (timer-based, replaces random per-frame) ----
     trafficSpawnTimer -= delta;
@@ -409,6 +448,7 @@ function initScene() {
     // -- Random spawns (obstacles & power-ups only) ----
     if (Math.random() < 0.008 && obstacles.length < 6) spawnObstacle();
     if (Math.random() < 0.003) spawnPowerUp();
+    if (Math.random() < 0.0025 && jumpPickups.length < 3) spawnJumpPickup();
 
     // -- Invulnerability ----
     if (gameState.invulnerable) {
@@ -649,7 +689,8 @@ function showGameOverOverlay() {
     gameState.invulnerable     = false;
     gameState.invulnerableTime = 0;
     gameState.isJumping        = false;
-    gameState.jumpPower        = 0;
+    gameState.jumpVelocity     = 0;
+    gameState.jumpsAvailable   = 3;
     gameState.collisions       = 0;
 
     // Reset player car position and rotation
@@ -665,6 +706,20 @@ function showGameOverOverlay() {
     obstacles.length = 0;
     powerUps.forEach(p => scene.remove(p));
     powerUps.length = 0;
+    jumpPickups.forEach(j => scene.remove(j));
+    jumpPickups.length = 0;
+    pedestrians.forEach(p => scene.remove(p.group));
+    pedestrians.length = 0;
+    spawnPedestrians();
+
+    // Reset police convoy
+    policeConvoyActive = false;
+    policeConvoyTimer  = 0;
+    nextPoliceEventTime = 45;
+    policeCars.forEach(pc => scene.remove(pc.mesh));
+    policeCars.length = 0;
+    const warnEl = document.getElementById('event-warning');
+    if (warnEl) { clearInterval(warnEl._blinkId); warnEl.remove(); }
 
     // Reset spawn timer so first wave spawns quickly
     trafficSpawnTimer = 1;
@@ -738,6 +793,9 @@ function updateHUD() {
   const nitroBar = '█'.repeat(nitroFull) + '░'.repeat(4 - nitroFull);
   document.getElementById('nitro-bar').textContent = nitroBar;
   document.getElementById('nitro-value').textContent = nitroPercent + '%';
+
+  document.getElementById('jumps-value').textContent =
+    gameState.jumpsAvailable + '/3';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -973,6 +1031,459 @@ function updatePowerUps(delta) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Jump Pickups — cyan diamond, restores 1 jump on collection
+// ─────────────────────────────────────────────────────────────
+function createJumpPickup(x, z) {
+  const group = new THREE.Group();
+
+  // Glowing cyan octahedron (diamond shape)
+  const geo = new THREE.OctahedronGeometry(0.28, 0);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x00ffff,
+    emissive: 0x00ccff,
+    emissiveIntensity: 2.8,
+    roughness: 0.1,
+    metalness: 0.3
+  });
+  group.add(new THREE.Mesh(geo, mat));
+
+  // Small upward-pointing cone below the diamond
+  const coneGeo = new THREE.ConeGeometry(0.12, 0.22, 5);
+  const coneMat = new THREE.MeshStandardMaterial({
+    color: 0x00ddff,
+    emissive: 0x00aaff,
+    emissiveIntensity: 1.8
+  });
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.y = -0.48;
+  group.add(cone);
+
+  group.position.set(x, 1.2, z);
+  group.userData.isJumpPickup = true;
+  scene.add(group);
+  return group;
+}
+
+function spawnJumpPickup() {
+  const x = LANES[Math.floor(Math.random() * LANES.length)];
+  const z = playerCar.position.z - 30 - Math.random() * 30;
+  jumpPickups.push(createJumpPickup(x, z));
+}
+
+function updateJumpPickups(delta) {
+  for (let i = jumpPickups.length - 1; i >= 0; i--) {
+    const pickup = jumpPickups[i];
+    pickup.position.z += gameState.currentVelocity * delta;
+    pickup.rotation.y += 0.15;
+    pickup.position.y = 1.2 + Math.sin(gameState.time * 3 + i) * 0.18;
+
+    // Despawn when behind the player
+    if (pickup.position.z > playerCar.position.z + 60) {
+      scene.remove(pickup);
+      jumpPickups.splice(i, 1);
+      continue;
+    }
+
+    // Collection: restore 1 jump (capped at 3)
+    const dist = playerCar.position.distanceTo(pickup.position);
+    if (dist < 1.2) {
+      gameState.jumpsAvailable = Math.min(gameState.jumpsAvailable + 1, 3);
+      scene.remove(pickup);
+      jumpPickups.splice(i, 1);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pedestrians — low-poly characters walking on the sidewalk
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createPedestrian(startX, z)
+ * Builds one low-poly pedestrian with animated limbs.
+ * Returns an object with the group and the four pivot references
+ * needed for the walk cycle.
+ */
+function createPedestrian(startX, z) {
+  const group = new THREE.Group();
+
+  // Randomise colours so each pedestrian looks different
+  const shirtHue = Math.random();
+  const pantsHue = (shirtHue + 0.45 + Math.random() * 0.2) % 1;
+  const skinLit  = 0.50 + Math.random() * 0.20;
+
+  const skinMat  = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.07, 0.45, skinLit), roughness: 0.85
+  });
+  const shirtMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(shirtHue, 0.65, 0.42), roughness: 0.8
+  });
+  const pantsMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(pantsHue, 0.40, 0.28), roughness: 0.85
+  });
+
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), skinMat);
+  head.position.y = 1.54;
+  group.add(head);
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.42, 0.15), shirtMat);
+  torso.position.y = 1.08;
+  group.add(torso);
+
+  // Arms — pivot groups at shoulder level so rotation.x = swing
+  const armGeo = new THREE.BoxGeometry(0.09, 0.36, 0.09);
+
+  const leftShoulder = new THREE.Group();
+  leftShoulder.position.set(-0.20, 1.26, 0);
+  const lArmMesh = new THREE.Mesh(armGeo, shirtMat);
+  lArmMesh.position.y = -0.18;
+  leftShoulder.add(lArmMesh);
+  group.add(leftShoulder);
+
+  const rightShoulder = new THREE.Group();
+  rightShoulder.position.set(0.20, 1.26, 0);
+  const rArmMesh = new THREE.Mesh(armGeo, shirtMat);
+  rArmMesh.position.y = -0.18;
+  rightShoulder.add(rArmMesh);
+  group.add(rightShoulder);
+
+  // Legs — pivot groups at hip level
+  const legGeo = new THREE.BoxGeometry(0.10, 0.40, 0.10);
+
+  const leftHip = new THREE.Group();
+  leftHip.position.set(-0.09, 0.76, 0);
+  const lLegMesh = new THREE.Mesh(legGeo, pantsMat);
+  lLegMesh.position.y = -0.20;
+  leftHip.add(lLegMesh);
+  group.add(leftHip);
+
+  const rightHip = new THREE.Group();
+  rightHip.position.set(0.09, 0.76, 0);
+  const rLegMesh = new THREE.Mesh(legGeo, pantsMat);
+  rLegMesh.position.y = -0.20;
+  rightHip.add(rLegMesh);
+  group.add(rightHip);
+
+  group.position.set(startX, 0, z);
+  scene.add(group);
+
+  return { group, leftShoulder, rightShoulder, leftHip, rightHip };
+}
+
+/**
+ * spawnPedestrians()
+ * Places pedestrians on the left and right sidewalks (outside the road),
+ * walking parallel to the road along the Z axis.
+ * dir: +1 = toward camera (+Z in world), −1 = away from camera (−Z).
+ */
+function spawnPedestrians() {
+  const configs = [
+    // Left sidewalk (x ≈ -7)
+    { x: -7.0, z: -14, speed: 0.8, dir:  1, phase: 0.0 },
+    { x: -7.3, z: -26, speed: 0.6, dir:  1, phase: 1.5 },
+    { x: -6.8, z:  -6, speed: 0.7, dir: -1, phase: 0.8 },
+    // Right sidewalk (x ≈ +7)
+    { x:  7.0, z: -20, speed: 0.9, dir:  1, phase: 2.1 },
+    { x:  7.2, z: -32, speed: 0.5, dir:  1, phase: 0.4 },
+    { x:  7.0, z: -10, speed: 0.7, dir: -1, phase: 1.8 },
+  ];
+
+  configs.forEach(cfg => {
+    const p = createPedestrian(cfg.x, cfg.z);
+    p.speed     = cfg.speed;
+    p.direction = cfg.dir;   // +1 = toward camera, -1 = away from camera
+    p.phase     = cfg.phase;
+    // Face direction of travel along Z:
+    // +1 (toward camera) → face +Z (rotation.y = Math.PI)
+    // -1 (away from camera) → face -Z (rotation.y = 0)
+    p.group.rotation.y = cfg.dir > 0 ? Math.PI : 0;
+    pedestrians.push(p);
+  });
+}
+
+/**
+ * updatePedestrians(delta)
+ * Scrolls each pedestrian with the world and adds their own walking pace
+ * along Z (parallel to the road, on the sidewalk). Recycles them back
+ * ahead of the camera when they disappear behind it.
+ */
+function updatePedestrians(delta) {
+  const WALK_SPEED = 5.0;   // limb oscillation speed (radians/sec)
+  const SWING_AMP  = 0.44;  // max limb rotation in radians
+
+  pedestrians.forEach(p => {
+    // ── World scroll + own walking pace along Z ───────────────
+    p.group.position.z += gameState.currentVelocity * delta;
+    p.group.position.z += p.direction * p.speed * delta;
+
+    // Recycle: once past camera, reset far ahead
+    if (p.group.position.z > 12) {
+      p.group.position.z = -28 - Math.random() * 20;
+    }
+
+    // ── Walk cycle animation ──────────────────────────────────
+    p.phase += delta * WALK_SPEED;
+    const swing = Math.sin(p.phase) * SWING_AMP;
+
+    p.leftHip.rotation.x       =  swing;
+    p.rightHip.rotation.x      = -swing;
+    p.leftShoulder.rotation.x  = -swing * 0.55;
+    p.rightShoulder.rotation.x =  swing * 0.55;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Police Convoy Event
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createPoliceCar(x, z)
+ * Low-poly police car: white/black body built on createCar(), plus
+ * a roof siren bar with alternating red/blue PointLights.
+ * Returns { mesh, redPoint, bluePoint, redMesh, blueMesh, velocity, passed }.
+ */
+function createPoliceCar(x, z) {
+  // Geometry constants (must match createCar() internals)
+  const WHEEL_R = 0.28;
+  const BODY_H  = 0.22;
+  const CABIN_H = 0.42;
+  const ROOF_TOP = WHEEL_R + BODY_H * 2 + CABIN_H; // ≈ 1.14
+
+  // White base car
+  const car = createCar(0xeeeeee);
+
+  // Black roof panel
+  const blackMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+  const roofGeo  = new THREE.BoxGeometry(1.46, 0.07, 1.93);
+  const roofMesh = new THREE.Mesh(roofGeo, blackMat);
+  roofMesh.position.set(0, ROOF_TOP - 0.035, -0.12);
+  car.add(roofMesh);
+
+  // Siren bar housing (dark grey box on roof)
+  const barMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7 });
+  const barGeo  = new THREE.BoxGeometry(0.88, 0.13, 0.32);
+  const bar     = new THREE.Mesh(barGeo, barMat);
+  bar.position.set(0, ROOF_TOP + 0.065, -0.12);
+  car.add(bar);
+
+  // Red siren lens (left half of bar)
+  const lenGeo  = new THREE.BoxGeometry(0.28, 0.10, 0.26);
+  const redMat  = new THREE.MeshStandardMaterial({
+    color: 0xff1111, emissive: 0xff0000, emissiveIntensity: 3, roughness: 0.3
+  });
+  const redMesh = new THREE.Mesh(lenGeo, redMat);
+  redMesh.position.set(-0.26, ROOF_TOP + 0.065, -0.12);
+  car.add(redMesh);
+
+  // Blue siren lens (right half of bar)
+  const blueMat  = new THREE.MeshStandardMaterial({
+    color: 0x1133ff, emissive: 0x0022ff, emissiveIntensity: 3, roughness: 0.3
+  });
+  const blueMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.10, 0.26), blueMat);
+  blueMesh.position.set(0.26, ROOF_TOP + 0.065, -0.12);
+  car.add(blueMesh);
+
+  // PointLights — start at intensity 0, toggled each frame
+  const redPoint  = new THREE.PointLight(0xff2200, 0, 10);
+  redPoint.position.set(-0.3, ROOF_TOP + 0.35, -0.12);
+  car.add(redPoint);
+
+  const bluePoint = new THREE.PointLight(0x0033ff, 0, 10);
+  bluePoint.position.set(0.3, ROOF_TOP + 0.35, -0.12);
+  car.add(bluePoint);
+
+  car.position.set(x, 0, z);
+  scene.add(car);
+
+  return { mesh: car, redPoint, bluePoint, redMesh, blueMesh, velocity: 0, passed: false };
+}
+
+/**
+ * spawnPoliceConvoy()
+ * Three police cars in a staggered formation that never blocks all lanes
+ * simultaneously, leaving at least one gap the player can thread through.
+ *
+ * Formation (z offsets relative to 55 units ahead of player):
+ *   Car A — left lane,    z+0   → gap: centre + right
+ *   Car B — right lane,   z−15  → gap: left + centre
+ *   Car C — centre lane,  z−32  → gap: left + right
+ */
+function spawnPoliceConvoy() {
+  const base = playerCar.position.z - 55;
+  const vel  = gameState.baseVelocity * 0.82;
+
+  [
+    { lane: LANES[0], zOff:   0 },   // left
+    { lane: LANES[2], zOff: -15 },   // right
+    { lane: LANES[1], zOff: -32 },   // centre
+  ].forEach(f => {
+    const pc = createPoliceCar(f.lane, base + f.zOff);
+    pc.velocity = vel;
+    policeCars.push(pc);
+  });
+}
+
+/**
+ * showEventWarning(text)
+ * Injects a flashing neon banner. Stops blinking after 4 s and
+ * displays a quieter "ACTIVE" notice for the rest of the event.
+ */
+function showEventWarning(text) {
+  let el = document.getElementById('event-warning');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'event-warning';
+    Object.assign(el.style, {
+      position:    'fixed',
+      top:         '18%',
+      left:        '50%',
+      transform:   'translateX(-50%)',
+      fontFamily:  'monospace',
+      fontSize:    '1.45rem',
+      fontWeight:  'bold',
+      color:       '#ff2222',
+      textShadow:  '0 0 10px #ff0000, 0 0 26px #ff0000',
+      background:  'rgba(0,0,0,0.75)',
+      border:      '2px solid #ff2222',
+      borderRadius:'6px',
+      padding:     '0.5rem 1.4rem',
+      pointerEvents:'none',
+      zIndex:      '999',
+      letterSpacing:'0.12em',
+      textAlign:   'center',
+      whiteSpace:  'nowrap',
+    });
+    document.body.appendChild(el);
+  }
+
+  el.textContent  = text;
+  el.style.opacity = '1';
+
+  // Fast blink for 4 s to catch the player's eye
+  let blink = true;
+  el._blinkId = setInterval(() => {
+    blink = !blink;
+    el.style.opacity = blink ? '1' : '0.2';
+  }, 320);
+
+  setTimeout(() => {
+    clearInterval(el._blinkId);
+    el.style.opacity   = '0.65';
+    el.textContent     = '⚠ POLICE CONVOY ACTIVE ⚠';
+    el.style.color     = '#ffaa00';
+    el.style.textShadow = '0 0 8px #ff8800';
+    el.style.border    = '2px solid #ffaa00';
+  }, 4000);
+}
+
+function startPoliceConvoyEvent() {
+  policeConvoyActive = true;
+  policeConvoyTimer  = 20;   // event window: 20 seconds
+  spawnPoliceConvoy();
+  showEventWarning('🚨 POLICE CONVOY AHEAD 🚨');
+}
+
+function endPoliceConvoyEvent() {
+  policeConvoyActive = false;
+  policeConvoyTimer  = 0;
+  policeCars.forEach(pc => scene.remove(pc.mesh));
+  policeCars.length = 0;
+
+  const el = document.getElementById('event-warning');
+  if (el) { clearInterval(el._blinkId); el.remove(); }
+
+  // Next convoy 50 seconds later
+  nextPoliceEventTime = gameState.time + 50;
+}
+
+/**
+ * updatePoliceConvoy(delta)
+ * • Scrolls police cars toward the player.
+ * • Alternates siren red/blue at ~8 Hz.
+ * • Game Over on collision (same AABB as enemy cars).
+ * • Double-overtake bonus when a cop car is passed.
+ * • Ends the event early when all cars are behind the player.
+ */
+function updatePoliceConvoy(delta) {
+  if (!policeConvoyActive) return;
+
+  policeConvoyTimer -= delta;
+  if (policeConvoyTimer <= 0) {
+    endPoliceConvoyEvent();
+    return;
+  }
+
+  // Siren alternates red ↔ blue at ~4 Hz each colour
+  const redOn = Math.sin(gameState.time * 25) > 0;
+
+  let allPassed = policeCars.length > 0;   // becomes false if any cop not yet passed
+
+  for (let i = policeCars.length - 1; i >= 0; i--) {
+    const pc = policeCars[i];
+
+    // Scroll toward player
+    pc.mesh.position.z += pc.velocity * delta;
+
+    // Spin wheels
+    const rps = pc.velocity / (2 * Math.PI * 0.28);
+    pc.mesh.traverse(child => {
+      if (child.userData.isWheelSpin) child.rotation.x += rps * delta * Math.PI * 2;
+    });
+
+    // Despawn when well past player
+    if (pc.mesh.position.z > playerCar.position.z + 22) {
+      scene.remove(pc.mesh);
+      policeCars.splice(i, 1);
+      continue;
+    }
+
+    // Siren flash
+    pc.redPoint.intensity              = redOn  ? 4 : 0;
+    pc.bluePoint.intensity             = !redOn ? 4 : 0;
+    pc.redMesh.material.emissiveIntensity  = redOn  ? 3 : 0.25;
+    pc.blueMesh.material.emissiveIntensity = !redOn ? 3 : 0.25;
+
+    // Collision → game over
+    if (!gameState.invulnerable) {
+      const dx = Math.abs(pc.mesh.position.x - playerCar.position.x);
+      const dz = Math.abs(pc.mesh.position.z - playerCar.position.z);
+      if (dx < 1.3 && dz < 2.2 && playerCar.position.y < 0.5) {
+        gameOver();
+        return;
+      }
+    }
+
+    // Overtake detection — cop car slid behind player
+    if (!pc.passed && pc.mesh.position.z > playerCar.position.z + 2) {
+      pc.passed = true;
+      gameState.overtakes += 2;   // convoy overtake worth double
+    }
+
+    if (!pc.passed) allPassed = false;
+  }
+
+  // All cops passed → clear event early + show bonus banner
+  if (allPassed) {
+    endPoliceConvoyEvent();
+    const bonus = document.createElement('div');
+    bonus.textContent = '✅ CONVOY CLEARED!  +BONUS';
+    Object.assign(bonus.style, {
+      position: 'fixed', top: '28%', left: '50%',
+      transform: 'translateX(-50%)',
+      fontFamily: 'monospace', fontSize: '1.2rem',
+      color: '#00ff88', textShadow: '0 0 12px #00ff88',
+      background: 'rgba(0,0,0,0.72)',
+      border: '2px solid #00ff88', borderRadius: '6px',
+      padding: '0.4rem 1.2rem', pointerEvents: 'none', zIndex: '999',
+    });
+    document.body.appendChild(bonus);
+    setTimeout(() => bonus.remove(), 2500);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Road
 // ─────────────────────────────────────────────────────────────
 function buildRoad(scene) {
@@ -1025,6 +1536,7 @@ function buildRoad(scene) {
     stripe.userData.isRoadStripe = true;
     scene.add(stripe);
   }
+
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1207,6 +1719,82 @@ function createStreetLight(side) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Mountain factory — low-poly irregular peaks
+// ─────────────────────────────────────────────────────────────
+function createMountain(x, z, scale = 1) {
+  const group = new THREE.Group();
+
+  // Dark blue-grey colour palette, slightly randomised per mountain
+  const hue = 0.56 + Math.random() * 0.10;  // blue → grey-blue
+  const sat = 0.06 + Math.random() * 0.10;
+  const lit = 0.11 + Math.random() * 0.11;
+
+  /** Build one cone peak with vertex perturbation for irregularity */
+  function makePeak(radius, height, segs, perturbAmt, litShift = 0) {
+    const geo = new THREE.ConeGeometry(radius, height, segs, 1);
+    const pos = geo.attributes.position;
+    const apexY = height * 0.5;
+
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      // Perturb more on the sides, less near the apex
+      const t = Math.max(0, 1 - (y / apexY) * 0.9);
+      const p = perturbAmt * t;
+      pos.setX(i, pos.getX(i) + (Math.random() - 0.5) * 2 * p);
+      pos.setZ(i, pos.getZ(i) + (Math.random() - 0.5) * 2 * p);
+      pos.setY(i, y + (Math.random() - 0.5) * p * 0.4);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, sat, lit + litShift),
+      roughness: 0.95,
+      flatShading: true     // faceted low-poly look
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    return mesh;
+  }
+
+  // ── Main peak ──────────────────────────────────────────────
+  const mainH    = (15 + Math.random() * 13) * scale;
+  const mainR    = (7  + Math.random() *  5) * scale;
+  const mainSegs = 5 + Math.floor(Math.random() * 3);  // 5, 6 or 7
+
+  const mainMesh = makePeak(mainR, mainH, mainSegs, mainR * 0.30);
+  mainMesh.position.y = mainH * 0.5;
+  group.add(mainMesh);
+
+  // ── Secondary peak (~60 % chance) — neighbouring shoulder ─
+  if (Math.random() > 0.4) {
+    const secH    = mainH * (0.42 + Math.random() * 0.36);
+    const secR    = mainR * (0.44 + Math.random() * 0.30);
+    const secSegs = 4 + Math.floor(Math.random() * 3);
+    const sec = makePeak(secR, secH, secSegs, secR * 0.25, -0.03);
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = mainR * (0.55 + Math.random() * 0.40);
+    sec.position.set(Math.cos(angle) * dist, secH * 0.5, Math.sin(angle) * dist);
+    group.add(sec);
+  }
+
+  // ── Tertiary small bump (~35 % chance) ────────────────────
+  if (Math.random() > 0.65) {
+    const terH = mainH * (0.22 + Math.random() * 0.20);
+    const terR = mainR * (0.28 + Math.random() * 0.20);
+    const ter  = makePeak(terR, terH, 5, terR * 0.20, 0.04);
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = mainR * (0.65 + Math.random() * 0.50);
+    ter.position.set(Math.cos(angle) * dist, terH * 0.5, Math.sin(angle) * dist);
+    group.add(ter);
+  }
+
+  group.position.set(x, 0, z);
+  return group;
+}
+
+// ─────────────────────────────────────────────────────────────
 function buildScenery(scene) {
   // ── Street lights — every 24 units, alternating sides ──
   for (let z = -200; z < 100; z += 24) {
@@ -1232,25 +1820,28 @@ function buildScenery(scene) {
     });
   }
 
-  // Mountains
-  const mtMat = new THREE.MeshStandardMaterial({
-    color: 0x4a4a4a,
-    roughness: 1
-  });
-
-  const mountains = [
-    { x: -35, z: -180, w: 20, h: 40 },
-    { x: -15, z: -160, w: 18, h: 35 },
-    { x: 15, z: -170, w: 22, h: 38 },
-    { x: 40, z: -150, w: 20, h: 36 }
-  ];
-
-  mountains.forEach(m => {
-    const geo = new THREE.ConeGeometry(m.w / 2, m.h, 6);
-    const mesh = new THREE.Mesh(geo, mtMat);
-    mesh.position.set(m.x, m.h / 2, m.z);
-    scene.add(mesh);
-  });
+  // ── Mountains — low-poly irregular peaks on both sides ─────
+  [
+    // Left side — closer to near, progressively deeper
+    { x: -22, z: -118, s: 0.80 },
+    { x: -36, z: -140, s: 1.10 },
+    { x: -52, z: -158, s: 1.35 },
+    { x: -30, z: -175, s: 0.95 },
+    { x: -65, z: -130, s: 1.20 },
+    { x: -46, z: -202, s: 1.55 },
+    // Right side
+    { x:  24, z: -122, s: 0.80 },
+    { x:  40, z: -148, s: 1.10 },
+    { x:  57, z: -162, s: 1.30 },
+    { x:  33, z: -178, s: 0.90 },
+    { x:  64, z: -132, s: 1.15 },
+    { x:  50, z: -208, s: 1.50 },
+    // Deep background — tallest, create horizon depth
+    { x: -12, z: -220, s: 1.90 },
+    { x:   8, z: -235, s: 1.70 },
+    { x: -32, z: -250, s: 2.10 },
+    { x:  26, z: -244, s: 1.85 },
+  ].forEach(m => scene.add(createMountain(m.x, m.z, m.s)));
 }
 
 // ─────────────────────────────────────────────────────────────
