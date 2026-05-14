@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dash Retro 3D</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ========== MAIN MENU ========== -->
+  <div id="main-menu">
+
+    <!-- Synthwave grid background decoration -->
+    <div class="grid-bg"></div>
+
+    <!-- Sun / horizon decoration -->
+    <div class="retro-sun"></div>
+
+    <!-- Title block -->
+    <div class="title-block">
+      <h1 class="game-title">DASH</h1>
+      <h1 class="game-title accent">RETRO 3D</h1>
+      <div class="title-underline"></div>
+    </div>
+
+    <!-- Menu buttons -->
+    <div class="menu-buttons">
+      <button id="btn-start" class="menu-btn primary">▶ START GAME</button>
+      <button id="btn-exit"  class="menu-btn secondary">✕ EXIT</button>
+    </div>
+
+    <!-- Footer credit -->
+    <p class="footer-text">INSERT COIN TO PLAY &nbsp;|&nbsp; © 2024 DASH RETRO</p>
+  </div>
+
+  <!-- ========== GAME CANVAS (hidden until START) ========== -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Three.js from CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js"
+      }
+    }
+  </script>
+
+  <!-- Game logic -->
+  <script type="module" src="main.js"></script>
+</body>
+</html>

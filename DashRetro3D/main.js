@@ -1,0 +1,1513 @@
+/**
+ * ============================================================
+ *  DASH RETRO 3D — ADVANCED RACING GAME
+ *  Auto-acceleration, traffic, power-ups, obstacles, day/night
+ * ============================================================
+ */
+
+import * as THREE from 'three';
+
+// ─────────────────────────────────────────────────────────────
+// DOM references
+// ─────────────────────────────────────────────────────────────
+const menu       = document.getElementById('main-menu');
+const canvas     = document.getElementById('game-canvas');
+const btnStart   = document.getElementById('btn-start');
+const btnExit    = document.getElementById('btn-exit');
+
+// ─────────────────────────────────────────────────────────────
+// Menu button handlers
+// ─────────────────────────────────────────────────────────────
+
+/** START GAME — hide menu, show canvas, boot Three.js */
+btnStart.addEventListener('click', () => {
+  menu.classList.add('hidden');
+  canvas.style.display = 'block';
+  gameState = {
+    time: 0,
+    baseVelocity: 12,
+    currentVelocity: 0,
+    overtakes: 0,
+    score: 0,
+    nitroCharge: 100,
+    invulnerable: false,
+    invulnerableTime: 0,
+    dayNightCycle: 0,
+    collisions: 0,
+    isJumping: false,
+    jumpPower: 0
+  };
+  enemyCars = [];
+  obstacles = [];
+  powerUps = [];
+  headlightSpots = [];
+  isGameOver = false;
+  initScene();
+});
+
+/** EXIT — simple window close */
+btnExit.addEventListener('click', () => {
+  window.close();
+  document.body.innerHTML =
+    '<p style="color:#00f5ff;font-family:monospace;padding:2rem;font-size:1.5rem;">GAME OVER — CLOSE THIS TAB TO EXIT</p>';
+});
+
+// ─────────────────────────────────────────────────────────────
+// Return to menu handler (ESC key)
+// ─────────────────────────────────────────────────────────────
+function returnToMenu() {
+  menu.classList.remove('hidden');
+  canvas.style.display = 'none';
+  const hud = document.getElementById('game-hud');
+  if (hud) hud.remove();
+  location.reload();
+}
+
+// Global game state
+let gameState = {
+  time: 0,
+  baseVelocity: 12,        // velocidade base — cresce com o tempo e ultrapassagens
+  currentVelocity: 0,
+  overtakes: 0,
+  score: 0,
+  nitroCharge: 100,
+  invulnerable: false,
+  invulnerableTime: 0,
+  dayNightCycle: 0,
+  collisions: 0,
+  isJumping: false,
+  jumpPower: 0
+};
+
+// ── Lane system ──────────────────────────────────────────────
+// Three fixed lanes on the road (x positions)
+const LANES = [-3, 0, 3];
+
+let enemyCars = [];       // replaces old trafficCars
+let trafficSpawnTimer = 0;// countdown between wave spawns
+let obstacles = [];
+let powerUps = [];
+let scene, camera, renderer, playerCar, clock;
+let isGameOver = false;   // stops the update logic when true
+let headlightSpots = [];  // [leftSpotLight, rightSpotLight] for the player car
+
+// ── Camera system ────────────────────────────────────────────
+// 0 = Chase (3rd person)  1 = Top (ortho)  2 = Hood  3 = Cinematic
+let activeCamIndex = 0;
+let chaseCamera, topCamera, hoodCamera, cinCamera;
+const CAM_NAMES = ['CHASE', 'TOP', 'HOOD', 'CINEMATIC'];
+
+// Crash visual effect state
+const crashEffect = {
+  active:    false,
+  timer:     0,       // counts up from 0 after impact
+  duration:  1.2,     // seconds the effect runs before overlay appears
+  shakeAmp:  0.35,    // camera shake amplitude
+  tiltAngle: 0.45,    // max backward tilt (rotation.x) of the player car
+  flashEl:   null,    // reference to the red flash DOM element
+};
+
+
+// ─────────────────────────────────────────────────────────────
+// Three.js scene bootstrap
+// ─────────────────────────────────────────────────────────────
+function initScene() {
+
+  // ── Scene ──────────────────────────────────────────────────
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+  scene.fog = new THREE.Fog(0x87ceeb, 120, 250);
+
+  // ── Cameras ────────────────────────────────────────────────
+  const aspect = window.innerWidth / window.innerHeight;
+
+  // 0 — Chase: terceira pessoa, atrás e acima do carro
+  chaseCamera = new THREE.PerspectiveCamera(65, aspect, 0.1, 500);
+  chaseCamera.position.set(0, 3.5, 12);
+  chaseCamera.lookAt(0, 1, 0);
+
+  // 1 — Top: vista de cima ortográfica (estilo arcade clássico)
+  const orthoH = 30;
+  const orthoW = orthoH * aspect;
+  topCamera = new THREE.OrthographicCamera(
+    -orthoW / 2, orthoW / 2,
+     orthoH / 2, -orthoH / 2,
+    0.1, 500
+  );
+  topCamera.position.set(0, 50, 0);
+  topCamera.lookAt(0, 0, 0);
+
+  // 2 — Hood: câmera no capô, sensação de cockpit
+  hoodCamera = new THREE.PerspectiveCamera(80, aspect, 0.1, 500);
+
+  // 3 — Cinematic: ângulo lateral afastado
+  cinCamera = new THREE.PerspectiveCamera(55, aspect, 0.1, 500);
+
+  // Câmera ativa inicial
+  camera = chaseCamera;
+
+  // ── Renderer ───────────────────────────────────────────────
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  // ── Lights ─────────────────────────────────────────────────
+  const ambientLight = new THREE.AmbientLight(0xffffff, 2);
+  scene.add(ambientLight);
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+  dirLight.position.set(50, 80, 30);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  dirLight.shadow.camera.near = 1;
+  dirLight.shadow.camera.far  = 300;
+  dirLight.shadow.camera.left   = -100;
+  dirLight.shadow.camera.right  =  100;
+  dirLight.shadow.camera.top    =  100;
+  dirLight.shadow.camera.bottom = -100;
+  scene.add(dirLight);
+
+  // ── Build everything ──────────────────────────────────────
+  buildRoad(scene);
+  playerCar = buildCar(scene);
+  buildScenery(scene);
+
+  // Collect the player car's SpotLights for headlight mode control
+  playerCar.traverse(child => {
+    if (child.userData.isHeadlightSpot) headlightSpots.push(child);
+  });
+  // Start with headlights off (press 1/2/3 to activate)
+  setHeadlightMode('off');
+
+  // ── Keyboard input ─────────────────────────────────────────
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Escape') returnToMenu();
+    if (e.code === 'Space') gameState.isJumping = true;
+    if (e.code === 'KeyN' && gameState.nitroCharge > 20) gameState.nitroActive = true;
+    // Headlight modes
+    if (e.code === 'Digit1') setHeadlightMode('minimo');
+    if (e.code === 'Digit2') setHeadlightMode('medio');
+    if (e.code === 'Digit3') setHeadlightMode('maximo');
+    // Camera switch — C cycles through all 4 cameras
+    if (e.code === 'KeyC') {
+      activeCamIndex = (activeCamIndex + 1) % 4;
+      camera = [chaseCamera, topCamera, hoodCamera, cinCamera][activeCamIndex];
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      showCamLabel(CAM_NAMES[activeCamIndex]);
+    }
+  });
+  window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    if (e.code === 'Space') gameState.isJumping = false;
+    if (e.code === 'KeyN') gameState.nitroActive = false;
+  });
+
+  // ── HUD ────────────────────────────────────────────────────
+  const hud = document.createElement('div');
+  hud.id = 'game-hud';
+  hud.innerHTML = `
+    <div class="hud-container">
+      <div class="hud-speed">
+        <span class="hud-label">SPEED</span>
+        <span id="speed-value">0</span> KM/H
+      </div>
+      <div class="hud-info">
+        <div>LEVEL: <span id="level-value">1</span></div>
+        <div>OVERTAKES: <span id="overtakes-value">0</span></div>
+        <div>NITRO: <span id="nitro-bar">████</span> <span id="nitro-value">100%</span></div>
+        <div id="headlight-mode" style="color:#ffff88;">FAROL: OFF</div>
+        <div id="time-display">TIME: DAY ☀️</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(hud);
+
+  // ── Menu hamburger — criado fora do #game-hud para receber cliques ──
+  // O #game-hud tem pointer-events:none (necessário para o jogo),
+  // por isso o botão e o painel vivem directamente no <body>.
+  const menuBtn = document.createElement('button');
+  menuBtn.id = 'hud-menu-btn';
+  menuBtn.setAttribute('aria-label', 'Controls');
+  menuBtn.textContent = '☰';
+  document.body.appendChild(menuBtn);
+
+  const ctrlPanel = document.createElement('div');
+  ctrlPanel.id = 'hud-controls-panel';
+  ctrlPanel.innerHTML = `
+    <div class="hud-controls-title">CONTROLS</div>
+    <div class="hud-ctrl-row"><span class="hud-key">A / ←</span><span>Esquerda</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">D / →</span><span>Direita</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">SPACE</span><span>Salto</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">N</span><span>Nitro</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">1</span><span>Farol mínimo</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">2</span><span>Farol médio</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">3</span><span>Farol máximo</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">C</span><span>Câmera</span></div>
+    <div class="hud-ctrl-row"><span class="hud-key">ESC</span><span>Menu</span></div>
+  `;
+  document.body.appendChild(ctrlPanel);
+
+  // Toggle: abrir/fechar painel ao clicar no botão ☰
+  menuBtn.addEventListener('click', () => {
+    ctrlPanel.classList.toggle('open');
+  });
+
+  // ── Resize handler ─────────────────────────────────────────
+  window.addEventListener('resize', () => {
+    const a = window.innerWidth / window.innerHeight;
+    [chaseCamera, hoodCamera, cinCamera].forEach(c => {
+      c.aspect = a;
+      c.updateProjectionMatrix();
+    });
+    const h = 30, w = h * a;
+    topCamera.left = -w / 2; topCamera.right = w / 2;
+    topCamera.top = h / 2;   topCamera.bottom = -h / 2;
+    topCamera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ── Animation loop ─────────────────────────────────────────
+  clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    // ── Crash effect + game-over hold ────────────────────────
+    if (isGameOver) {
+      const dt = clock.getDelta();
+
+      if (crashEffect.active) {
+        crashEffect.timer += dt;
+        const t = crashEffect.timer;
+
+        // 1. Backward tilt: player car rocks on X axis then settles
+        playerCar.rotation.x = crashEffect.tiltAngle *
+          Math.exp(-t * 3) * Math.cos(t * 14);
+
+        // 2. Camera shake: decays exponentially
+        const shake = crashEffect.shakeAmp * Math.exp(-t * 4);
+        camera.position.x += (Math.random() - 0.5) * shake;
+        camera.position.y += (Math.random() - 0.5) * shake * 0.5;
+
+        // 3. Red flash: fade out the DOM overlay
+        if (crashEffect.flashEl) {
+          crashEffect.flashEl.style.opacity =
+            String(Math.max(0, 0.7 - t * 1.4));
+        }
+
+        // After effect duration → show the Game Over overlay
+        if (crashEffect.timer >= crashEffect.duration) {
+          crashEffect.active = false;
+          showGameOverOverlay();
+        }
+      }
+
+      renderer.render(scene, camera);
+      return;
+    }
+
+    const delta = clock.getDelta();
+
+    // -- Update game time ----
+    gameState.time += delta;
+
+    // -- Velocidade base cresce com o tempo (sem limite) ----
+    // +0.6 unidades por segundo no início, acelera ao longo do tempo
+    gameState.baseVelocity += 0.6 * delta;
+
+    // -- Nitro boost ou velocidade normal ----
+    if (gameState.nitroActive && gameState.nitroCharge > 0) {
+      // Nitro: 2.5× a velocidade base
+      gameState.currentVelocity = THREE.MathUtils.lerp(
+        gameState.currentVelocity,
+        gameState.baseVelocity * 2.5,
+        0.08
+      );
+      gameState.nitroCharge -= 60 * delta;
+      if (gameState.nitroCharge <= 0) {
+        gameState.nitroCharge = 0;
+        gameState.nitroActive = false;
+      }
+    } else {
+      // Normal: segue baseVelocity suavemente
+      gameState.currentVelocity = THREE.MathUtils.lerp(
+        gameState.currentVelocity,
+        gameState.baseVelocity,
+        0.04
+      );
+      if (gameState.nitroCharge < 100) gameState.nitroCharge += 15 * delta;
+    }
+    gameState.nitroCharge = THREE.MathUtils.clamp(gameState.nitroCharge, 0, 100);
+
+    // -- Jump mechanic ----
+    // Car group origin is at road level (y = 0), so resting y = 0
+    if (gameState.isJumping && gameState.currentVelocity > 12) {
+      gameState.jumpPower = Math.min(gameState.jumpPower + 15 * delta, 2);
+      playerCar.position.y = gameState.jumpPower;
+    } else if (gameState.jumpPower > 0) {
+      gameState.jumpPower = Math.max(gameState.jumpPower - 12 * delta, 0);
+      playerCar.position.y = gameState.jumpPower;
+    } else {
+      playerCar.position.y = 0;
+    }
+
+    // -- Steering (only left/right) ----
+    if (keys['KeyA'] || keys['ArrowLeft']) {
+      playerCar.position.x = Math.max(playerCar.position.x - 4 * delta, -3.2);
+      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z,  0.18, 0.1);
+    } else if (keys['KeyD'] || keys['ArrowRight']) {
+      playerCar.position.x = Math.min(playerCar.position.x + 4 * delta, 3.2);
+      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z, -0.18, 0.1);
+    } else {
+      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z,  0, 0.1);
+    }
+
+    // -- Scroll road/scenery + sway tree foliage ----
+    scene.children.forEach(obj => {
+      if (obj.userData.isRoadStripe) {
+        obj.position.z += gameState.currentVelocity * delta;
+        if (obj.position.z > 15) obj.position.z -= 100;
+      }
+      if (obj.userData.isScenery) {
+        obj.position.z += gameState.currentVelocity * delta;
+        if (obj.position.z > 30) obj.position.z -= 120;
+
+        // Animate foliage sway for tree groups
+        if (obj.userData.swayOffset !== undefined) {
+          const swayAngle = Math.sin(gameState.time * 1.8 + obj.userData.swayOffset) * 0.06;
+          obj.children.forEach(child => {
+            if (child.userData.isTreeFoliage) {
+              child.rotation.z = swayAngle;
+              child.rotation.x = Math.cos(gameState.time * 1.2 + obj.userData.swayOffset) * 0.03;
+            }
+          });
+        }
+      }
+    });
+
+    // -- Collision detection ----
+    checkCollisions();
+
+    // -- Update enemy traffic ----
+    updateEnemyCars(delta);
+    updateObstacles(delta);
+    updatePowerUps(delta);
+
+    // -- Traffic wave spawn (timer-based, replaces random per-frame) ----
+    trafficSpawnTimer -= delta;
+    if (trafficSpawnTimer <= 0 && enemyCars.length < 9) {
+      spawnTrafficWave();
+      // Interval shrinks slightly as game speeds up (min 2 s)
+      trafficSpawnTimer = Math.max(2, 4 - gameState.time / 60);
+    }
+
+    // -- Random spawns (obstacles & power-ups only) ----
+    if (Math.random() < 0.008 && obstacles.length < 6) spawnObstacle();
+    if (Math.random() < 0.003) spawnPowerUp();
+
+    // -- Invulnerability ----
+    if (gameState.invulnerable) {
+      gameState.invulnerableTime -= delta;
+      if (gameState.invulnerableTime <= 0) {
+        gameState.invulnerable = false;
+      }
+    }
+
+    // -- Update active camera ----
+    updateActiveCamera(delta);
+
+    // -- Day/night cycle ----
+    updateDayNightCycle();
+
+    // -- Update HUD ----
+    updateHUD();
+
+    // -- Wheel rotation (player car) ────────────────────────
+    // Each wheel has a spinner Group (isWheelSpin = true) whose
+    // rotation.z = π/2 re-maps the cylinder so its axle aligns
+    // with the car's X axis. Incrementing rotation.x here spins
+    // the cylinder forward — like a real rolling wheel.
+    // Speed factor: circumference = 2π·r ≈ 1.76, so dividing
+    // velocity by ~1.76 gives one full revolution per unit travelled.
+    const wheelRPS = gameState.currentVelocity / (2 * Math.PI * 0.28);
+    playerCar.traverse(child => {
+      if (child.userData.isWheelSpin) {
+        child.rotation.x += wheelRPS * delta * Math.PI * 2;
+      }
+    });
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Camera system
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * updateActiveCamera(delta)
+ * Runs every frame. Updates whichever camera is active.
+ * All cameras track the player; each has its own position logic.
+ */
+function updateActiveCamera(delta) {
+  const px = playerCar.position.x;
+  const py = playerCar.position.y;
+  const pz = playerCar.position.z;
+
+  // FOV boost during nitro (chase + hood + cinematic only)
+  const targetFov = (gameState.nitroActive && gameState.nitroCharge > 0) ? 85 : 65;
+
+  switch (activeCamIndex) {
+
+    // ── 0: Chase — third-person behind/above ─────────────────
+    case 0: {
+      chaseCamera.fov = THREE.MathUtils.lerp(chaseCamera.fov, targetFov, 0.05);
+      chaseCamera.updateProjectionMatrix();
+      chaseCamera.position.x = THREE.MathUtils.lerp(chaseCamera.position.x, px * 0.25, 0.08);
+      chaseCamera.position.y = THREE.MathUtils.lerp(chaseCamera.position.y, py + 3.5, 0.06);
+      chaseCamera.position.z = pz + 12;
+      chaseCamera.lookAt(px, py + 0.8, pz - 5);
+      break;
+    }
+
+    // ── 1: Top — orthographic bird's-eye view ────────────────
+    case 1: {
+      topCamera.position.x = THREE.MathUtils.lerp(topCamera.position.x, px, 0.06);
+      topCamera.position.z = THREE.MathUtils.lerp(topCamera.position.z, pz, 0.06);
+      topCamera.lookAt(px, py, pz);
+      break;
+    }
+
+    // ── 2: Hood — cockpit feel, mounted on the car ───────────
+    case 2: {
+      hoodCamera.fov = THREE.MathUtils.lerp(hoodCamera.fov, targetFov + 15, 0.05);
+      hoodCamera.updateProjectionMatrix();
+      // Position: just above the hood, moving with the car
+      const hoodOffset = new THREE.Vector3(0, 1.4, 0.5);
+      hoodOffset.applyEuler(playerCar.rotation);
+      hoodCamera.position.set(
+        px + hoodOffset.x,
+        py + hoodOffset.y,
+        pz + hoodOffset.z
+      );
+      hoodCamera.lookAt(px, py + 1.2, pz - 25);
+      break;
+    }
+
+    // ── 3: Cinematic — wide lateral angle ────────────────────
+    case 3: {
+      cinCamera.fov = THREE.MathUtils.lerp(cinCamera.fov, targetFov - 10, 0.04);
+      cinCamera.updateProjectionMatrix();
+      // Oscillates gently side-to-side for a dynamic feel
+      const sideOsc = Math.sin(gameState.time * 0.4) * 2;
+      const targetX = px + 10 + sideOsc;
+      const targetY = py + 4;
+      const targetZ = pz + 8;
+      cinCamera.position.x = THREE.MathUtils.lerp(cinCamera.position.x, targetX, 0.04);
+      cinCamera.position.y = THREE.MathUtils.lerp(cinCamera.position.y, targetY, 0.04);
+      cinCamera.position.z = THREE.MathUtils.lerp(cinCamera.position.z, targetZ, 0.04);
+      cinCamera.lookAt(px, py + 0.5, pz - 3);
+      break;
+    }
+  }
+}
+
+/**
+ * showCamLabel(name)
+ * Briefly shows the camera name on screen when switching.
+ */
+let _camLabelTimeout = null;
+function showCamLabel(name) {
+  let el = document.getElementById('cam-label');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'cam-label';
+    document.body.appendChild(el);
+  }
+  el.textContent = '📷 ' + name;
+  el.classList.add('visible');
+  clearTimeout(_camLabelTimeout);
+  _camLabelTimeout = setTimeout(() => el.classList.remove('visible'), 1800);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Collision detection
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * checkCollisions()
+ * Uses THREE.Box3 AABB tests between the player car and every
+ * enemy car. Invulnerability (power-up shield) is respected.
+ * On hit → gameOver() is called.
+ */
+const _playerBox = new THREE.Box3();
+const _enemyBox  = new THREE.Box3();
+
+function checkCollisions() {
+  if (gameState.invulnerable) return;
+
+  _playerBox.setFromObject(playerCar);
+  // Shrink the player box slightly so grazing passes don't trigger
+  _playerBox.expandByScalar(-0.15);
+
+  for (let i = 0; i < enemyCars.length; i++) {
+    _enemyBox.setFromObject(enemyCars[i].mesh);
+    _enemyBox.expandByScalar(-0.15);
+
+    if (_playerBox.intersectsBox(_enemyBox)) {
+      gameOver();
+      return;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Game Over
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * gameOver()
+ * ──────────
+ * Called the instant a collision is detected.
+ * 1. Freezes all gameplay (isGameOver = true).
+ * 2. Zeroes velocities so nothing moves.
+ * 3. Triggers the crash visual effect (tilt + shake + red flash).
+ * The Game Over overlay is shown after crashEffect.duration seconds.
+ */
+function gameOver() {
+  if (isGameOver) return;   // guard against double-trigger
+  isGameOver = true;
+
+  // Freeze all movement immediately
+  gameState.currentVelocity = 0;
+  gameState.baseVelocity    = 0;
+  enemyCars.forEach(ec => { ec.velocity = 0; });
+
+  // Activate crash visual effect
+  crashEffect.active = true;
+  crashEffect.timer  = 0;
+
+  // Inject full-screen red flash element
+  const flash = document.createElement('div');
+  flash.id = 'crash-flash';
+  document.body.appendChild(flash);
+  crashEffect.flashEl = flash;
+}
+
+/**
+ * showGameOverOverlay()
+ * ─────────────────────
+ * Builds and injects the Game Over UI panel.
+ * Called automatically after the crash effect finishes.
+ * REPLAY resets all state in-place (no page reload).
+ */
+function showGameOverOverlay() {
+  const secs  = Math.floor(gameState.time);
+  const speed = Math.round(gameState.currentVelocity * 10);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'gameover-overlay';
+  overlay.innerHTML = `
+    <div class="go-box">
+      <h1 class="go-title">GAME OVER</h1>
+      <div class="go-stats">
+        <div>TEMPO SOBREVIVIDO: <span>${secs}s</span></div>
+        <div>ULTRAPASSAGENS: <span>${gameState.overtakes}</span></div>
+      </div>
+      <button id="btn-replay" class="go-btn">↺ REPLAY</button>
+      <button id="btn-gomenu" class="go-btn secondary">⌂ MENU</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // ── REPLAY: full in-place reset (no page reload) ──────────
+  document.getElementById('btn-replay').addEventListener('click', () => {
+    // Remove overlay and flash
+    overlay.remove();
+    if (crashEffect.flashEl) { crashEffect.flashEl.remove(); crashEffect.flashEl = null; }
+
+    // Reset crash effect
+    crashEffect.active = false;
+    crashEffect.timer  = 0;
+
+    // Reset game state
+    isGameOver = false;
+    gameState.time             = 0;
+    gameState.currentVelocity  = 0;
+    gameState.baseVelocity     = 12;
+    gameState.overtakes        = 0;
+    gameState.score            = 0;
+    gameState.nitroCharge      = 100;
+    gameState.nitroActive      = false;
+    gameState.invulnerable     = false;
+    gameState.invulnerableTime = 0;
+    gameState.isJumping        = false;
+    gameState.jumpPower        = 0;
+    gameState.collisions       = 0;
+
+    // Reset player car position and rotation
+    playerCar.position.set(0, 0, 5);
+    playerCar.rotation.set(0, 0, 0);
+
+    // Remove all enemy cars from scene and clear array
+    enemyCars.forEach(ec => scene.remove(ec.mesh));
+    enemyCars.length = 0;
+
+    // Remove all obstacles and power-ups
+    obstacles.forEach(o => scene.remove(o));
+    obstacles.length = 0;
+    powerUps.forEach(p => scene.remove(p));
+    powerUps.length = 0;
+
+    // Reset spawn timer so first wave spawns quickly
+    trafficSpawnTimer = 1;
+
+    // Reset camera system to chase view
+    activeCamIndex = 0;
+    camera = chaseCamera;
+    chaseCamera.position.set(0, 3.5, 12);
+    chaseCamera.rotation.set(0, 0, 0);
+  });
+
+  // ── MENU: reload page to return to main menu ──────────────
+  document.getElementById('btn-gomenu').addEventListener('click', () => {
+    location.reload();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Headlight modes
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * setHeadlightMode(mode)
+ * Adjusts the two player SpotLights stored in headlightSpots[].
+ * mode: 'off' | 'minimo' | 'medio' | 'maximo'
+ *
+ * Each mode changes:
+ *   intensity — brightness of the cone
+ *   distance  — how far the beam reaches
+ *   angle     — width of the cone (radians)
+ */
+const HEADLIGHT_MODES = {
+  off:    { intensity: 0,    distance: 0,  angle: Math.PI / 8  },
+  minimo: { intensity: 1.5,  distance: 12, angle: Math.PI / 10 },
+  medio:  { intensity: 4,    distance: 22, angle: Math.PI / 7  },
+  maximo: { intensity: 9,    distance: 38, angle: Math.PI / 5  },
+};
+
+function setHeadlightMode(mode) {
+  const cfg = HEADLIGHT_MODES[mode];
+  if (!cfg) return;
+
+  headlightSpots.forEach(spot => {
+    spot.intensity = cfg.intensity;
+    spot.distance  = cfg.distance;
+    spot.angle     = cfg.angle;
+  });
+
+  // Update HUD indicator if it exists
+  const el = document.getElementById('headlight-mode');
+  if (el) {
+    const labels = { off: 'OFF', minimo: 'MIN ●', medio: 'MED ●●', maximo: 'MAX ●●●' };
+    el.textContent = 'FAROL: ' + (labels[mode] || mode.toUpperCase());
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// HUD Update
+// ─────────────────────────────────────────────────────────────
+function updateHUD() {
+  const speed = Math.round(gameState.currentVelocity * 10);
+  document.getElementById('speed-value').textContent = speed;
+
+  const level = Math.floor(1 + gameState.time / 40);
+  document.getElementById('level-value').textContent = level;
+
+  document.getElementById('overtakes-value').textContent = gameState.overtakes;
+
+  const nitroPercent = Math.round(gameState.nitroCharge);
+  const nitroFull = Math.floor(nitroPercent / 25);
+  const nitroBar = '█'.repeat(nitroFull) + '░'.repeat(4 - nitroFull);
+  document.getElementById('nitro-bar').textContent = nitroBar;
+  document.getElementById('nitro-value').textContent = nitroPercent + '%';
+}
+
+// ─────────────────────────────────────────────────────────────
+// Day/Night Cycle
+// ─────────────────────────────────────────────────────────────
+function updateDayNightCycle() {
+  const cycleTime = (gameState.time % 90) / 90;
+  let timeDisplay = 'DAY ☀️';
+  let bgColor = 0x87ceeb;
+  let fogColor = 0x87ceeb;
+
+  if (cycleTime > 0.33 && cycleTime < 0.66) {
+    timeDisplay = 'SUNSET 🌅';
+    bgColor = 0xff7f00;
+    fogColor = 0xff7f00;
+  } else if (cycleTime > 0.66) {
+    timeDisplay = 'NIGHT 🌙';
+    bgColor = 0x0a0010;
+    fogColor = 0x0a0010;
+  }
+
+  scene.background.setHex(bgColor);
+  scene.fog.color.setHex(fogColor);
+  document.getElementById('time-display').textContent = 'TIME: ' + timeDisplay;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Traffic System — lane-based, fair spawn
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build one enemy car mesh at world position (x, z).
+ * Uses the shared createCar() factory — same quality as the player car.
+ * Car group origin is at y = 0 so wheels touch the road automatically.
+ */
+function createEnemyCar(x, z) {
+  // Pick a random vivid hue, avoiding red (player colour)
+  const hue = (0.08 + Math.random() * 0.84) % 1.0;
+  const color = new THREE.Color().setHSL(hue, 0.78, 0.48);
+
+  const car = createCar(color);
+  car.position.set(x, 0, z);   // y = 0 → wheels on road
+  scene.add(car);
+  return car;
+}
+
+/**
+ * Spawn a wave of 1–2 enemy cars.
+ *
+ * Rules that keep the game fair:
+ *  1. Choose 1 or 2 random lanes from LANES = [-3, 0, 3].
+ *  2. If 2 cars, offset their Z by at least MIN_Z_GAP so they are
+ *     never side-by-side — guaranteeing at least one free lane.
+ *  3. The Z position of each car is chosen so it doesn't stack
+ *     on top of an existing enemy car (MIN_Z_CLEAR separation).
+ */
+function spawnTrafficWave() {
+  const MIN_Z_GAP   = 12;  // min Z distance between cars in the same wave
+  const MIN_Z_CLEAR = 8;   // min Z distance from any existing enemy car
+  const spawnBase   = playerCar.position.z - 45; // spawn ahead of player
+
+  // Shuffle lane order so we don't always fill left→right
+  const shuffled = [...LANES].sort(() => Math.random() - 0.5);
+
+  // 1 car ~60 % of the time, 2 cars ~40 %
+  const count = Math.random() < 0.6 ? 1 : 2;
+  const chosenLanes = shuffled.slice(0, count);
+
+  chosenLanes.forEach((laneX, i) => {
+    // Stagger Z: second car is MIN_Z_GAP further ahead (more negative)
+    const baseZ = spawnBase - i * MIN_Z_GAP - Math.random() * 10;
+
+    // Skip if too close to an existing enemy in Z (any lane)
+    const tooClose = enemyCars.some(ec =>
+      Math.abs(ec.mesh.position.z - baseZ) < MIN_Z_CLEAR
+    );
+    if (tooClose) return;
+
+    // Inimigos correm a 55–75% da velocidade base atual — o jogador apanha-os naturalmente
+    const velocity = gameState.baseVelocity * (0.55 + Math.random() * 0.2);
+
+    const mesh = createEnemyCar(laneX, baseZ);
+    enemyCars.push({ mesh, velocity, laneX, passed: false });
+  });
+}
+
+/**
+ * Move every enemy car straight ahead (positive Z = toward camera).
+ * Despawn cars that have passed the player.
+ * Detect overtakes and collisions.
+ */
+function updateEnemyCars(delta) {
+  // Iterate backwards so splice doesn't skip entries
+  for (let i = enemyCars.length - 1; i >= 0; i--) {
+    const ec = enemyCars[i];
+
+    // Move straight in Z — never changes X
+    ec.mesh.position.z += ec.velocity * delta;
+
+    // Rotate wheels — same spinner architecture as player car
+    const rps = ec.velocity / (2 * Math.PI * 0.28);
+    ec.mesh.traverse(child => {
+      if (child.userData.isWheelSpin) {
+        child.rotation.x += rps * delta * Math.PI * 2;
+      }
+    });
+
+    // Despawn when well past the player
+    if (ec.mesh.position.z > playerCar.position.z + 20) {
+      scene.remove(ec.mesh);
+      enemyCars.splice(i, 1);
+      continue;
+    }
+
+    // Ultrapassagem: carro inimigo ficou atrás do jogador em faixa diferente.
+    // A flag 'passed' garante que só conta uma vez por carro.
+    if (!ec.passed && ec.mesh.position.z > playerCar.position.z + 2) {
+      if (Math.abs(ec.mesh.position.x - playerCar.position.x) > 1.0) {
+        ec.passed = true;
+        gameState.overtakes++;
+        // Cada ultrapassagem dá um salto extra na velocidade base
+        gameState.baseVelocity += 0.8;
+      }
+    }
+
+    // Collision: bounding-box style check (1.4 wide × 3 deep)
+    const dx = Math.abs(ec.mesh.position.x - playerCar.position.x);
+    const dz = Math.abs(ec.mesh.position.z - playerCar.position.z);
+    if (dx < 1.4 && dz < 2.4 && !gameState.invulnerable) {
+      gameState.invulnerable = true;
+      gameState.invulnerableTime = 2;
+      gameState.collisions++;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Obstacles
+// ─────────────────────────────────────────────────────────────
+function spawnObstacle() {
+  const obstacleGeo = new THREE.BoxGeometry(1.4, 0.3, 0.5);
+  const obstacleMat = new THREE.MeshStandardMaterial({
+    color: 0xff6600,
+    emissive: 0xff3300,
+    emissiveIntensity: 1
+  });
+  const obstacle = new THREE.Mesh(obstacleGeo, obstacleMat);
+  obstacle.position.set(
+    (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 1.2),
+    0.15,
+    playerCar.position.z - 35 - Math.random() * 45
+  );
+  obstacle.userData.isObstacle = true;
+  scene.add(obstacle);
+  obstacles.push(obstacle);
+}
+
+function updateObstacles(delta) {
+  obstacles.forEach((obs, idx) => {
+    obs.position.z += gameState.currentVelocity * delta;
+    obs.rotation.y += 0.08;
+
+    if (obs.position.z > playerCar.position.z + 60) {
+      scene.remove(obs);
+      obstacles.splice(idx, 1);
+      return;
+    }
+
+    const dist = playerCar.position.distanceTo(obs.position);
+    if (dist < 1.3 && !gameState.invulnerable) {
+      gameState.invulnerable = true;
+      gameState.invulnerableTime = 1.5;
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Power-ups
+// ─────────────────────────────────────────────────────────────
+function spawnPowerUp() {
+  const types = ['shield', 'nitro', 'speed'];
+  const type = types[Math.floor(Math.random() * types.length)];
+
+  let color = 0x00ff00;
+  if (type === 'shield') color = 0x0088ff;
+  if (type === 'speed') color = 0xff00ff;
+
+  const powerGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+  const powerMat = new THREE.MeshStandardMaterial({
+    color: color,
+    emissive: color,
+    emissiveIntensity: 1.8
+  });
+  const power = new THREE.Mesh(powerGeo, powerMat);
+  power.position.set(
+    (Math.random() > 0.5 ? 1 : -1) * (0.3 + Math.random() * 2.5),
+    1,
+    playerCar.position.z - 30 - Math.random() * 30
+  );
+  power.userData.powerType = type;
+  power.userData.isPowerUp = true;
+  scene.add(power);
+  powerUps.push(power);
+}
+
+function updatePowerUps(delta) {
+  powerUps.forEach((power, idx) => {
+    power.position.z += gameState.currentVelocity * delta;
+    power.rotation.y += 0.12;
+    power.position.y = 1 + Math.sin(gameState.time * 4) * 0.4;
+
+    if (power.position.z > playerCar.position.z + 60) {
+      scene.remove(power);
+      powerUps.splice(idx, 1);
+      return;
+    }
+
+    const dist = playerCar.position.distanceTo(power.position);
+    if (dist < 1) {
+      if (power.userData.powerType === 'shield') {
+        gameState.invulnerable = true;
+        gameState.invulnerableTime = 6;
+      } else if (power.userData.powerType === 'nitro') {
+        gameState.nitroCharge = 100;
+      } else if (power.userData.powerType === 'speed') {
+        gameState.currentVelocity += 6;
+      }
+
+      scene.remove(power);
+      powerUps.splice(idx, 1);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Road
+// ─────────────────────────────────────────────────────────────
+function buildRoad(scene) {
+  const roadGeo = new THREE.PlaneGeometry(10, 400);
+  const roadMat = new THREE.MeshStandardMaterial({
+    color: 0x222222,
+    roughness: 0.8
+  });
+  const road = new THREE.Mesh(roadGeo, roadMat);
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(0, -0.01, -100);
+  road.receiveShadow = true;
+  scene.add(road);
+
+  const groundGeo = new THREE.PlaneGeometry(500, 500);
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: 0x228b22,
+    roughness: 0.9
+  });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.02;
+  scene.add(ground);
+
+  const edgeMat = new THREE.MeshStandardMaterial({
+    color: 0xffff00,
+    emissive: 0xffff00,
+    emissiveIntensity: 0.8
+  });
+
+  [-5, 5].forEach(x => {
+    const edgeGeo = new THREE.PlaneGeometry(0.1, 400);
+    const edge = new THREE.Mesh(edgeGeo, edgeMat);
+    edge.rotation.x = -Math.PI / 2;
+    edge.position.set(x, 0, -100);
+    scene.add(edge);
+  });
+
+  const stripeMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xffffff,
+    emissiveIntensity: 0.5
+  });
+
+  for (let z = -200; z < 100; z += 10) {
+    const stripeGeo = new THREE.PlaneGeometry(0.2, 5);
+    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(0, 0.01, z);
+    stripe.userData.isRoadStripe = true;
+    scene.add(stripe);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scenery (trees, light posts)
+// ─────────────────────────────────────────────────────────────
+// Low-poly tree factory
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createTree()
+ * Builds a low-poly tree with a varied multi-sphere canopy.
+ * Group origin is at y = 0 (ground level).
+ *
+ * Canopy structure (all tagged isTreeFoliage for sway):
+ *   • 1 large central sphere
+ *   • 2–3 mid spheres offset laterally and vertically
+ *   • 1 small top sphere
+ * Each sphere gets a slightly different green for depth.
+ */
+function createTree() {
+  const tree = new THREE.Group();
+
+  // ── Randomise scale so not all trees are identical ──────
+  const scale   = 0.85 + Math.random() * 0.35;   // 0.85 – 1.2
+  const trunkH  = (2.2 + Math.random() * 0.8) * scale;
+  const trunkR  = (0.14 + Math.random() * 0.06) * scale;
+
+  // ── Trunk ───────────────────────────────────────────────
+  const trunkMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.07, 0.55, 0.22 + Math.random() * 0.08),
+    roughness: 1
+  });
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(trunkR * 0.7, trunkR, trunkH, 7),
+    trunkMat
+  );
+  trunk.position.y = trunkH / 2;
+  trunk.castShadow = true;
+  tree.add(trunk);
+
+  // ── Canopy — 4 overlapping low-poly spheres ─────────────
+  // Each sphere gets a slightly varied green hue for depth
+  const baseY = trunkH;   // bottom of canopy starts at trunk top
+
+  const blobs = [
+    // [x offset, y offset from baseY, radius, hue lightness tweak]
+    { x:  0,    y: 1.1 * scale, r: 1.15 * scale, l:  0   },   // central large
+    { x: -0.7 * scale, y: 0.55 * scale, r: 0.82 * scale, l: -0.03 },   // left mid
+    { x:  0.72 * scale, y: 0.6  * scale, r: 0.78 * scale, l:  0.03 },   // right mid
+    { x:  0.15 * scale, y: 1.9  * scale, r: 0.55 * scale, l:  0.06 },   // top small
+  ];
+
+  blobs.forEach(b => {
+    const lightness = THREE.MathUtils.clamp(0.24 + b.l + Math.random() * 0.06, 0.18, 0.38);
+    const saturation = 0.55 + Math.random() * 0.15;
+    const hue = 0.28 + (Math.random() - 0.5) * 0.04;  // green band 0.26–0.30
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, saturation, lightness),
+      roughness: 0.9,
+      flatShading: true     // flat shading = low-poly faceted look
+    });
+
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(b.r, 7, 5),  // 7×5 = nice low-poly facets
+      mat
+    );
+    sphere.position.set(b.x, baseY + b.y, 0);
+    sphere.rotation.y = Math.random() * Math.PI;  // vary silhouette
+    sphere.castShadow = true;
+    sphere.userData.isTreeFoliage = true;          // sway animation target
+    tree.add(sphere);
+  });
+
+  return tree;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Street light factory
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createStreetLight(side)
+ * ────────────────────────
+ * Builds one realistic low-poly street lamp.
+ * side: -1 = left side (arm points right toward road)
+ *        1 = right side (arm points left toward road)
+ *
+ * Structure:
+ *   • Base plate (flat box on the ground)
+ *   • Vertical pole (tapered cylinder)
+ *   • Horizontal arm (thin box pointing toward road)
+ *   • Lamp housing (small box, emissive warm yellow)
+ *   • SpotLight aimed at road centre (castShadow off for perf)
+ *   • PointLight for ambient glow halo around the lamp
+ *
+ * Group origin is at (0,0,0) — caller sets world position.
+ */
+function createStreetLight(side) {
+  const pole = new THREE.Group();
+
+  // ── Materials ──────────────────────────────────────────
+  const metalMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2a35,
+    roughness: 0.6,
+    metalness: 0.7
+  });
+  const lampMat = new THREE.MeshStandardMaterial({
+    color: 0xffe8a0,
+    emissive: 0xffcc44,
+    emissiveIntensity: 2.5,
+    roughness: 0.3
+  });
+
+  // ── Base plate ─────────────────────────────────────────
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.12, 0.5),
+    metalMat
+  );
+  base.position.y = 0.06;
+  base.castShadow = true;
+  pole.add(base);
+
+  // ── Vertical pole (tapered) ────────────────────────────
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.1, 5.5, 8),
+    metalMat
+  );
+  shaft.position.y = 2.75 + 0.12;
+  shaft.castShadow = true;
+  pole.add(shaft);
+
+  // ── Horizontal arm pointing toward road ────────────────
+  // side = -1 → arm goes to +x (right toward x=0 road)
+  // side =  1 → arm goes to -x (left toward x=0 road)
+  const armLen = 1.6;
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(armLen, 0.09, 0.09),
+    metalMat
+  );
+  arm.position.set(-side * armLen / 2, 5.62, 0);
+  arm.castShadow = true;
+  pole.add(arm);
+
+  // ── Small vertical drop at arm tip ─────────────────────
+  const drop = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.04, 0.4, 6),
+    metalMat
+  );
+  drop.position.set(-side * armLen, 5.42, 0);
+  pole.add(drop);
+
+  // ── Lamp housing (box) ─────────────────────────────────
+  const lamp = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.18, 0.32),
+    lampMat
+  );
+  lamp.position.set(-side * armLen, 5.22, 0);
+  pole.add(lamp);
+
+  // ── SpotLight aimed down at road ───────────────────────
+  const lampWorldX = -side * armLen;  // local X of lamp head
+  const spot = new THREE.SpotLight(0xffddaa, 2.8, 22, Math.PI / 5.5, 0.55, 1.5);
+  spot.position.set(lampWorldX, 5.2, 0);
+  spot.castShadow = false;  // keep perf safe
+  pole.add(spot);
+
+  // Target: road surface directly below the lamp
+  const target = new THREE.Object3D();
+  target.position.set(0, 0, 0);   // road centre at same Z; updated in scene
+  pole.add(target);
+  spot.target = target;
+
+  // ── PointLight for soft halo glow ──────────────────────
+  const halo = new THREE.PointLight(0xffcc66, 0.6, 8, 2);
+  halo.position.set(lampWorldX, 5.2, 0);
+  pole.add(halo);
+
+  return pole;
+}
+
+// ─────────────────────────────────────────────────────────────
+function buildScenery(scene) {
+  // ── Street lights — every 24 units, alternating sides ──
+  for (let z = -200; z < 100; z += 24) {
+    // Alternate: even index left side, odd index right side
+    const idx = Math.round((z + 200) / 24);
+    const side = (idx % 2 === 0) ? -1 : 1;  // -1=left +x arm, 1=right -x arm
+    const xPos = side === -1 ? -7 : 7;       // left post at x=-7, right at x=7
+
+    const light = createStreetLight(side);
+    light.position.set(xPos, 0, z);
+    light.userData.isScenery = true;
+    scene.add(light);
+  }
+
+  // Trees — low-poly volumetric canopy
+  for (let z = -180; z < 80; z += 20) {
+    [-10, 10].forEach(x => {
+      const tree = createTree();
+      tree.position.set(x, 0, z);
+      tree.userData.isScenery = true;
+      tree.userData.swayOffset = Math.random() * Math.PI * 2;
+      scene.add(tree);
+    });
+  }
+
+  // Mountains
+  const mtMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a4a,
+    roughness: 1
+  });
+
+  const mountains = [
+    { x: -35, z: -180, w: 20, h: 40 },
+    { x: -15, z: -160, w: 18, h: 35 },
+    { x: 15, z: -170, w: 22, h: 38 },
+    { x: 40, z: -150, w: 20, h: 36 }
+  ];
+
+  mountains.forEach(m => {
+    const geo = new THREE.ConeGeometry(m.w / 2, m.h, 6);
+    const mesh = new THREE.Mesh(geo, mtMat);
+    mesh.position.set(m.x, m.h / 2, m.z);
+    scene.add(mesh);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Shared car factory — used by player AND enemy cars
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createCar(color)
+ * ─────────────────
+ * Builds a low-poly arcade car from several primitives grouped
+ * under a single THREE.Group.
+ *
+ * Coordinate convention (group origin = road surface, y = 0):
+ *   WHEEL_R  = wheel radius  → wheels sit at y = WHEEL_R (touching y=0)
+ *   BODY_H   = lower-body half-height
+ *   Lower body centre  → y = WHEEL_R + BODY_H
+ *   Cabin centre       → y = WHEEL_R + BODY_H*2 + CABIN_H/2
+ *
+ * All sub-meshes with userData.isWheel = true are rotated each
+ * frame by the animation loop to show rolling motion.
+ */
+function createCar(color) {
+  const WHEEL_R  = 0.28;   // wheel radius  — wheels touch y = 0
+  const WHEEL_W  = 0.22;   // wheel width
+  const BODY_H   = 0.22;   // half-height of the lower body box
+  const BODY_Y   = WHEEL_R + BODY_H;          // 0.50 — body centre
+  const CABIN_H  = 0.42;
+  const CABIN_Y  = WHEEL_R + BODY_H * 2 + CABIN_H / 2;  // 0.93
+
+  const car = new THREE.Group();
+
+  // ── Materials ────────────────────────────────────────────
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color, roughness: 0.35, metalness: 0.65
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x88ccff, roughness: 0.05, metalness: 0.2,
+    transparent: true, opacity: 0.7
+  });
+  const darkMat = new THREE.MeshStandardMaterial({
+    color: 0x111111, roughness: 0.9
+  });
+  const wheelMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a, roughness: 0.9
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0xbbbbbb, metalness: 0.9, roughness: 0.15
+  });
+  const headlightMat = new THREE.MeshStandardMaterial({
+    color: 0xffffcc, emissive: 0xffff88, emissiveIntensity: 1.8
+  });
+  const taillightMat = new THREE.MeshStandardMaterial({
+    color: 0xff1111, emissive: 0xff0000, emissiveIntensity: 2
+  });
+
+  // ── Lower body (main chassis) ─────────────────────────────
+  const lowerGeo = new THREE.BoxGeometry(1.72, BODY_H * 2, 3.8);
+  const lower = new THREE.Mesh(lowerGeo, bodyMat);
+  lower.position.y = BODY_Y;
+  lower.castShadow = true;
+  car.add(lower);
+
+  // ── Raised side sills (visual detail) ────────────────────
+  [-0.88, 0.88].forEach(sx => {
+    const sillGeo = new THREE.BoxGeometry(0.08, 0.1, 3.6);
+    const sill = new THREE.Mesh(sillGeo, darkMat);
+    sill.position.set(sx, WHEEL_R + 0.05, 0);
+    car.add(sill);
+  });
+
+  // ── Cabin (upper body) ────────────────────────────────────
+  const cabinGeo = new THREE.BoxGeometry(1.48, CABIN_H, 1.95);
+  const cabin = new THREE.Mesh(cabinGeo, bodyMat);
+  cabin.position.set(0, CABIN_Y, -0.12);
+  cabin.castShadow = true;
+  car.add(cabin);
+
+  // ── Windshield (front glass pane) ─────────────────────────
+  const wsGeo = new THREE.PlaneGeometry(1.28, CABIN_H * 0.82);
+  const ws = new THREE.Mesh(wsGeo, glassMat);
+  ws.position.set(0, CABIN_Y - 0.02, 0.85);
+  ws.rotation.x = -0.28;   // slight rake
+  car.add(ws);
+
+  // ── Rear glass ────────────────────────────────────────────
+  const rgGeo = new THREE.PlaneGeometry(1.28, CABIN_H * 0.78);
+  const rg = new THREE.Mesh(rgGeo, glassMat);
+  rg.position.set(0, CABIN_Y - 0.02, -1.08);
+  rg.rotation.x = 0.28;
+  rg.rotation.y = Math.PI;
+  car.add(rg);
+
+  // ── Hood (front sloped panel) ─────────────────────────────
+  const hoodGeo = new THREE.BoxGeometry(1.68, 0.07, 0.72);
+  const hood = new THREE.Mesh(hoodGeo, bodyMat);
+  hood.position.set(0, BODY_Y + BODY_H - 0.01, 1.58);
+  hood.rotation.x = 0.18;
+  car.add(hood);
+
+  // ── Trunk lid (rear sloped panel) ─────────────────────────
+  const trunkGeo = new THREE.BoxGeometry(1.68, 0.07, 0.62);
+  const trunk = new THREE.Mesh(trunkGeo, bodyMat);
+  trunk.position.set(0, BODY_Y + BODY_H - 0.01, -1.75);
+  trunk.rotation.x = -0.18;
+  car.add(trunk);
+
+  // ── Front bumper ──────────────────────────────────────────
+  const fBumperGeo = new THREE.BoxGeometry(1.65, 0.18, 0.12);
+  const fBumper = new THREE.Mesh(fBumperGeo, darkMat);
+  fBumper.position.set(0, WHEEL_R + 0.09, 1.96);
+  car.add(fBumper);
+
+  // ── Rear bumper ───────────────────────────────────────────
+  const rBumperGeo = new THREE.BoxGeometry(1.65, 0.16, 0.12);
+  const rBumper = new THREE.Mesh(rBumperGeo, darkMat);
+  rBumper.position.set(0, WHEEL_R + 0.08, -1.96);
+  car.add(rBumper);
+
+  // ── Spoiler blade ─────────────────────────────────────────
+  const spoilerGeo = new THREE.BoxGeometry(1.56, 0.07, 0.32);
+  const spoiler = new THREE.Mesh(spoilerGeo, darkMat);
+  spoiler.position.set(0, CABIN_Y + CABIN_H / 2 + 0.14, -1.05);
+  car.add(spoiler);
+  // Spoiler posts
+  [-0.64, 0.64].forEach(sx => {
+    const postGeo = new THREE.BoxGeometry(0.06, 0.2, 0.06);
+    const post = new THREE.Mesh(postGeo, darkMat);
+    post.position.set(sx, CABIN_Y + CABIN_H / 2 + 0.04, -1.05);
+    car.add(post);
+  });
+
+  // ── Headlights ────────────────────────────────────────────
+  [-0.58, 0.58].forEach(sx => {
+    const hlGeo = new THREE.BoxGeometry(0.32, 0.13, 0.07);
+    const hl = new THREE.Mesh(hlGeo, headlightMat);
+    hl.position.set(sx, BODY_Y + 0.14, 1.93);
+    car.add(hl);
+  });
+
+  // ── Tail lights ───────────────────────────────────────────
+  [-0.58, 0.58].forEach(sx => {
+    const tlGeo = new THREE.BoxGeometry(0.3, 0.11, 0.07);
+    const tl = new THREE.Mesh(tlGeo, taillightMat);
+    tl.position.set(sx, BODY_Y + 0.12, -1.93);
+    car.add(tl);
+  });
+
+  // ── Exhaust pipes ─────────────────────────────────────────
+  [-0.42, 0.42].forEach(sx => {
+    const exGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.25, 7);
+    const ex = new THREE.Mesh(exGeo, darkMat);
+    ex.rotation.x = Math.PI / 2;
+    ex.position.set(sx, WHEEL_R + 0.04, -2.02);
+    car.add(ex);
+  });
+
+  // ── Headlight SpotLights (2×) ─────────────────────────────
+  // Each SpotLight is parented to the car group so it moves with
+  // the car automatically. A SpotLight needs a target object to
+  // define the cone direction; we create a small Object3D target
+  // placed ahead of each light and also add it to the car group.
+  //
+  // userData.isHeadlightSpot = true lets setHeadlightMode()
+  // find these lights via car.traverse().
+  [-0.55, 0.55].forEach(sx => {
+    const spot = new THREE.SpotLight(0xfff5cc, 0, 22, Math.PI / 7, 0.35, 1.5);
+    // Start at off (intensity 0) — setHeadlightMode() will enable them
+    spot.position.set(sx, BODY_Y + 0.14, 1.95);
+    spot.castShadow = false;   // keep perf reasonable
+    spot.userData.isHeadlightSpot = true;
+    car.add(spot);
+
+    // Target: a point on the road 10 units ahead of the light
+    const target = new THREE.Object3D();
+    target.position.set(sx, -0.5, 1.95 - 10);
+    car.add(target);
+    spot.target = target;
+  });
+
+  // ── Wheels (4×) ───────────────────────────────────────────
+  //
+  // Architecture: two-level group so orientation and spin are independent.
+  //
+  //   wheelPivot  (THREE.Group)
+  //     position  = axle world position (x, WHEEL_R, z)
+  //     rotation  = NONE — pivot stays upright in the car's local space
+  //     │
+  //     ├─ tyreSpinner  (THREE.Group)  ← rotation.x is incremented each frame
+  //     │    rotation.z = π/2          ← tilts cylinder to lie on its side
+  //     │    │
+  //     │    ├─ tyreMesh   CylinderGeometry  (isWheelSpin = true)
+  //     │    └─ rimMesh    CylinderGeometry  (isWheelSpin = true)
+  //     │
+  //     └─ archMesh  (static — never rotates)
+  //
+  // Why two levels?
+  //   A CylinderGeometry stands upright (Y axis = cylinder axis).
+  //   We need the wheel to spin around the car's X axis (left-right axle).
+  //   Applying rotation.z = π/2 to the spinner group re-maps the cylinder's
+  //   Y axis onto the world X axis, so incrementing the spinner's
+  //   rotation.x actually spins the cylinder around that axle — exactly
+  //   like a real wheel rolling forward.
+
+  const wheelX  = 0.97;    // lateral offset from centre
+  const wheelFZ =  1.18;   // front axle Z
+  const wheelRZ = -1.18;   // rear axle Z
+  const wheelY  = WHEEL_R; // centre height = radius → bottom touches y = 0
+
+  [
+    { x: -wheelX, z: wheelFZ },
+    { x:  wheelX, z: wheelFZ },
+    { x: -wheelX, z: wheelRZ },
+    { x:  wheelX, z: wheelRZ }
+  ].forEach(p => {
+
+    // ── Pivot: holds position, never rotates ────────────────
+    const wheelPivot = new THREE.Group();
+    wheelPivot.position.set(p.x, wheelY, p.z);
+    car.add(wheelPivot);
+
+    // ── Spinner: tilts cylinder onto its side, then spins on X ─
+    // rotation.z = π/2 → cylinder Y-axis now points along world X
+    // Incrementing rotation.x each frame = rolling around the axle
+    const tyreSpinner = new THREE.Group();
+    tyreSpinner.rotation.z = Math.PI / 2;
+    tyreSpinner.userData.isWheelSpin = true; // animation loop target
+    wheelPivot.add(tyreSpinner);
+
+    // Tyre mesh (upright cylinder inside spinner)
+    const tyreGeo = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, WHEEL_W, 16);
+    const tyreMesh = new THREE.Mesh(tyreGeo, wheelMat);
+    tyreMesh.castShadow = true;
+    tyreSpinner.add(tyreMesh);
+
+    // Rim mesh (smaller radius, lighter colour)
+    const rimGeo = new THREE.CylinderGeometry(WHEEL_R * 0.62, WHEEL_R * 0.62, WHEEL_W + 0.01, 8);
+    const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+    tyreSpinner.add(rimMesh);
+
+    // Wheel arch (static — attached to pivot, not spinner)
+    const archGeo = new THREE.BoxGeometry(WHEEL_W + 0.1, 0.08, WHEEL_R * 2 + 0.1);
+    const archMesh = new THREE.Mesh(archGeo, darkMat);
+    archMesh.position.y = WHEEL_R + 0.04; // above wheel centre
+    wheelPivot.add(archMesh);
+  });
+
+  // The group's local origin is at y = 0 (road level).
+  // The caller only needs to set car.position.set(x, 0, z)
+  return car;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Player Car — uses createCar()
+// ─────────────────────────────────────────────────────────────
+function buildCar(scene) {
+  const car = createCar(0xcc0022);   // classic arcade red
+  car.position.set(0, 0, 5);         // y = 0 → wheels touch road
+  scene.add(car);
+  return car;
+}
