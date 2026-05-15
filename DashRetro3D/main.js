@@ -36,12 +36,19 @@ btnStart.addEventListener('click', () => {
     collisions: 0,
     isJumping: false,
     jumpVelocity: 0,
-    jumpsAvailable: 3
+    jumpsAvailable: 3,
+    obstacleHit: false,
+    lastObstacleHitTime: -999,
+    speedPenaltyActive: false,
+    speedPenaltyTimer: 0,
+    speedPenaltyAmount: 50
   };
   enemyCars = [];
   obstacles = [];
   powerUps = [];
   jumpPickups = [];
+  coins = [];
+  coinsCollected = 0;
   pedestrians = [];
   policeCars = [];
   policeConvoyActive = false;
@@ -84,18 +91,41 @@ let gameState = {
   collisions: 0,
   isJumping: false,
   jumpVelocity: 0,
-  jumpsAvailable: 3
+  jumpsAvailable: 3,
+  obstacleHit: false,              // Flag para evitar múltiplos hits no mesmo obstáculo
+  lastObstacleHitTime: -999,       // Tempo desde o último hit em obstáculo
+  speedPenaltyActive: false,       // Se há penalidade de velocidade ativa
+  speedPenaltyTimer: 0,            // Timer para mostrar o feedback visual
+  speedPenaltyAmount: 50           // Quantidade reduzida de velocidade
+};
+
+// ── Obstacle Impact System ──────────────────────────────────
+// Constantes para o sistema de colisão de obstáculos
+const OBSTACLE_CONFIG = {
+  SPEED_PENALTY: 50,           // km/h reduzidos ao bater
+  HIT_COOLDOWN: 0.8,           // Segundos entre hits (evita múltiplos no mesmo obstáculo)
+  PENALTY_DURATION: 1.2,       // Duração do efeito visual de penalidade
+  CAMERA_SHAKE_AMPLITUDE: 0.25, // Amplitude da vibração da câmera
+  CAR_TILT_ANGLE: 0.15,        // Ângulo de inclinação do carro
+  OBSTACLE_RESPONSE_SPEED: 0.15 // Velocidade de reação do obstáculo
 };
 
 // ── Lane system ──────────────────────────────────────────────
 // Three fixed lanes on the road (x positions)
 const LANES = [-3, 0, 3];
 
+// ── Lane change control (arcade steering) ────────────────────
+let targetX = 0;              // target lane position (-3, 0, or 3)
+let laneChangeSpeed = 0.22;   // interpolation factor (higher = faster)
+let currentTurnTilt = 0;       // visual tilt angle when turning
+
 let enemyCars = [];       // replaces old trafficCars
 let trafficSpawnTimer = 0;// countdown between wave spawns
 let obstacles = [];
 let powerUps = [];
 let jumpPickups = [];
+let coins = [];           // collectible coins along the road
+let coinsCollected = 0;   // total coins collected
 let pedestrians = [];
 let policeCars         = [];
 let policeConvoyActive = false;
@@ -207,6 +237,13 @@ function initScene() {
       gameState.jumpsAvailable--;
     }
     if (e.code === 'KeyN' && gameState.nitroCharge > 20) gameState.nitroActive = true;
+    // Lane change: immediately set target to left/right
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+      targetX = LANES[0];  // leftmost lane = -3
+    }
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+      targetX = LANES[2];  // rightmost lane = 3
+    }
     // Headlight modes
     if (e.code === 'Digit1') setHeadlightMode('minimo');
     if (e.code === 'Digit2') setHeadlightMode('medio');
@@ -223,6 +260,10 @@ function initScene() {
   window.addEventListener('keyup', e => {
     keys[e.code] = false;
     if (e.code === 'KeyN') gameState.nitroActive = false;
+    // Release lane: return to center lane
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.code === 'KeyD' || e.code === 'ArrowRight') {
+      targetX = LANES[1];  // center lane = 0
+    }
   });
 
   // ── HUD ────────────────────────────────────────────────────
@@ -237,6 +278,7 @@ function initScene() {
       <div class="hud-info">
         <div>LEVEL: <span id="level-value">1</span></div>
         <div>OVERTAKES: <span id="overtakes-value">0</span></div>
+        <div style="color:#ffdd00;">💰 COINS: <span id="coins-value">0</span></div>
         <div>NITRO: <span id="nitro-bar">████</span> <span id="nitro-value">100%</span></div>
         <div style="color:#00ffff;">JUMPS: <span id="jumps-value">3/3</span></div>
         <div id="headlight-mode" style="color:#ffff88;">FAROL: OFF</div>
@@ -387,16 +429,28 @@ function initScene() {
       playerCar.rotation.x = THREE.MathUtils.lerp(playerCar.rotation.x, 0, 0.2);
     }
 
-    // -- Steering (only left/right) ----
-    if (keys['KeyA'] || keys['ArrowLeft']) {
-      playerCar.position.x = Math.max(playerCar.position.x - 4 * delta, -3.2);
-      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z,  0.18, 0.1);
-    } else if (keys['KeyD'] || keys['ArrowRight']) {
-      playerCar.position.x = Math.min(playerCar.position.x + 4 * delta, 3.2);
-      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z, -0.18, 0.1);
-    } else {
-      playerCar.rotation.z = THREE.MathUtils.lerp(playerCar.rotation.z,  0, 0.1);
-    }
+    // -- Steering with lane change interpolation ----
+    // Smoothly move playerCar.position.x toward targetX
+    playerCar.position.x = THREE.MathUtils.lerp(
+      playerCar.position.x,
+      targetX,
+      laneChangeSpeed
+    );
+
+    // Visual tilt effect: increases when moving toward different lane
+    // Calculate how far we are from the target lane
+    const laneError = targetX - playerCar.position.x;
+    const maxTilt = 0.22;  // maximum tilt angle when turning (in radians)
+    // More tilt when farther from target, decays as we approach
+    currentTurnTilt = laneError * 0.15;  // responsive to lane error
+    currentTurnTilt = THREE.MathUtils.clamp(currentTurnTilt, -maxTilt, maxTilt);
+
+    // Apply tilt rotation smoothly
+    playerCar.rotation.z = THREE.MathUtils.lerp(
+      playerCar.rotation.z,
+      currentTurnTilt,
+      0.18  // smooth interpolation for natural feel
+    );
 
     // -- Scroll road/scenery + sway tree foliage ----
     scene.children.forEach(obj => {
@@ -429,6 +483,7 @@ function initScene() {
     updateObstacles(delta);
     updatePowerUps(delta);
     updateJumpPickups(delta);
+    updateCoins(delta);
     updatePedestrians(delta);
     updatePoliceConvoy(delta);
 
@@ -449,6 +504,7 @@ function initScene() {
     if (Math.random() < 0.008 && obstacles.length < 6) spawnObstacle();
     if (Math.random() < 0.003) spawnPowerUp();
     if (Math.random() < 0.0025 && jumpPickups.length < 3) spawnJumpPickup();
+    if (Math.random() < 0.015 && coins.length < 25) spawnCoin();
 
     // -- Invulnerability ----
     if (gameState.invulnerable) {
@@ -457,6 +513,9 @@ function initScene() {
         gameState.invulnerable = false;
       }
     }
+
+    // -- Update obstacle impact visual effects ----
+    updateObstacleVisualEffects(delta);
 
     // -- Update active camera ----
     updateActiveCamera(delta);
@@ -485,6 +544,52 @@ function initScene() {
   }
 
   animate();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Obstacle visual effects (camera shake, car tilt)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * updateObstacleVisualEffects(delta)
+ * ──────────────────────────────────
+ * Updates the visual feedback effects when hitting an obstacle:
+ *   1. Camera shake (vibration)
+ *   2. Car tilt/rotation
+ *   3. Decays over time
+ */
+function updateObstacleVisualEffects(delta) {
+  if (!gameState.speedPenaltyActive) return;
+
+  // Decay the penalty timer
+  gameState.speedPenaltyTimer -= delta;
+  if (gameState.speedPenaltyTimer <= 0) {
+    gameState.speedPenaltyActive = false;
+    return;
+  }
+
+  // Calculate effect strength (1 at impact, 0 at end)
+  const effectStrength = gameState.speedPenaltyTimer / OBSTACLE_CONFIG.PENALTY_DURATION;
+
+  // ── Camera shake effect ──────────────────────────────────
+  // Add random vibration to camera position
+  if (activeCamIndex === 0) { // Chase camera
+    // Shake in X and Y
+    const shakeIntensity = OBSTACLE_CONFIG.CAMERA_SHAKE_AMPLITUDE * effectStrength;
+    const shakeX = (Math.random() - 0.5) * 2 * shakeIntensity;
+    const shakeY = (Math.random() - 0.5) * 2 * shakeIntensity;
+    chaseCamera.position.x += shakeX;
+    chaseCamera.position.y += shakeY;
+  }
+
+  // ── Car tilt effect ─────────────────────────────────────
+  // Tilt the car based on effect strength
+  const tiltAmount = OBSTACLE_CONFIG.CAR_TILT_ANGLE * effectStrength;
+  playerCar.rotation.x = THREE.MathUtils.lerp(
+    playerCar.rotation.x,
+    tiltAmount,
+    0.2
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -692,10 +797,18 @@ function showGameOverOverlay() {
     gameState.jumpVelocity     = 0;
     gameState.jumpsAvailable   = 3;
     gameState.collisions       = 0;
+    gameState.obstacleHit      = false;
+    gameState.lastObstacleHitTime = -999;
+    gameState.speedPenaltyActive = false;
+    gameState.speedPenaltyTimer = 0;
 
     // Reset player car position and rotation
     playerCar.position.set(0, 0, 5);
     playerCar.rotation.set(0, 0, 0);
+
+    // Reset lane control to center
+    targetX = LANES[1];  // center lane = 0
+    currentTurnTilt = 0;
 
     // Remove all enemy cars from scene and clear array
     enemyCars.forEach(ec => scene.remove(ec.mesh));
@@ -708,6 +821,9 @@ function showGameOverOverlay() {
     powerUps.length = 0;
     jumpPickups.forEach(j => scene.remove(j));
     jumpPickups.length = 0;
+    coins.forEach(c => scene.remove(c));
+    coins.length = 0;
+    coinsCollected = 0;
     pedestrians.forEach(p => scene.remove(p.group));
     pedestrians.length = 0;
     spawnPedestrians();
@@ -788,6 +904,8 @@ function updateHUD() {
 
   document.getElementById('overtakes-value').textContent = gameState.overtakes;
 
+  document.getElementById('coins-value').textContent = coinsCollected;
+
   const nitroPercent = Math.round(gameState.nitroCharge);
   const nitroFull = Math.floor(nitroPercent / 25);
   const nitroBar = '█'.repeat(nitroFull) + '░'.repeat(4 - nitroFull);
@@ -796,6 +914,15 @@ function updateHUD() {
 
   document.getElementById('jumps-value').textContent =
     gameState.jumpsAvailable + '/3';
+}
+
+/**
+ * updateCoinUI()
+ * Update the coin counter display in the HUD
+ */
+function updateCoinUI() {
+  const el = document.getElementById('coins-value');
+  if (el) el.textContent = coinsCollected;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -953,23 +1080,142 @@ function spawnObstacle() {
   obstacles.push(obstacle);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Obstacle collision system with speed penalty
+// ─────────────────────────────────────────────────────────────
+
+// Box3 instances for obstacle collision detection
+const _playerBoxObstacle = new THREE.Box3();
+const _obstacleBox = new THREE.Box3();
+
+/**
+ * updateObstacles(delta)
+ * Move obstacles along the road and check for collisions with the player car.
+ * On collision: reduces speed, applies visual effects, animates obstacle reaction.
+ */
 function updateObstacles(delta) {
   obstacles.forEach((obs, idx) => {
+    // Move obstacle along the road
     obs.position.z += gameState.currentVelocity * delta;
     obs.rotation.y += 0.08;
 
+    // Remove if past the player
     if (obs.position.z > playerCar.position.z + 60) {
       scene.remove(obs);
       obstacles.splice(idx, 1);
       return;
     }
 
-    const dist = playerCar.position.distanceTo(obs.position);
-    if (dist < 1.3 && !gameState.invulnerable) {
-      gameState.invulnerable = true;
-      gameState.invulnerableTime = 1.5;
+    // Collision detection using Box3
+    // Only check collision if enough time has passed since last obstacle hit
+    if (gameState.time - gameState.lastObstacleHitTime > OBSTACLE_CONFIG.HIT_COOLDOWN) {
+      _playerBoxObstacle.setFromObject(playerCar);
+      _playerBoxObstacle.expandByScalar(-0.15);
+
+      _obstacleBox.setFromObject(obs);
+      _obstacleBox.expandByScalar(-0.15);
+
+      // Check intersection
+      if (_playerBoxObstacle.intersectsBox(_obstacleBox)) {
+        hitObstacle(obs);
+        gameState.lastObstacleHitTime = gameState.time;
+      }
     }
   });
+}
+
+/**
+ * hitObstacle(obstacle)
+ * ──────────────────────
+ * Called when the player car collides with an orange obstacle.
+ * Effects:
+ *   1. Reduce speed penalty (doesn't cause Game Over)
+ *   2. Apply camera shake
+ *   3. Apply car tilt
+ *   4. Animate obstacle reaction (knock back, rotate, scale)
+ *   5. Show visual feedback (speed penalty indicator)
+ */
+function hitObstacle(obstacle) {
+  // Activate speed penalty
+  gameState.speedPenaltyActive = true;
+  gameState.speedPenaltyTimer = OBSTACLE_CONFIG.PENALTY_DURATION;
+
+  // Reduce baseVelocity to create speed penalty
+  // Calculate reduction based on current velocity
+  const currentSpeedKMH = gameState.currentVelocity * 10;
+  const newSpeedKMH = Math.max(0, currentSpeedKMH - OBSTACLE_CONFIG.SPEED_PENALTY);
+  gameState.baseVelocity = Math.max(2, newSpeedKMH / 10);
+
+  // Show visual feedback on screen
+  showObstaclePenaltyFeedback(OBSTACLE_CONFIG.SPEED_PENALTY);
+
+  // Store original position for animation
+  if (!obstacle.userData.hitData) {
+    obstacle.userData.hitData = {
+      originalPos: obstacle.position.clone(),
+      originalScale: obstacle.scale.clone(),
+      originalRot: obstacle.rotation.clone(),
+      impactTime: gameState.time,
+      knockBackDir: playerCar.position.clone().sub(obstacle.position).normalize()
+    };
+  }
+
+  // Animate obstacle reaction (knock back, spin, scale)
+  const hitData = obstacle.userData.hitData;
+  const timeSinceHit = gameState.time - hitData.impactTime;
+  const knockBackDuration = 0.6;
+
+  if (timeSinceHit < knockBackDuration) {
+    const knockBackAmount = 2.5 * (1 - timeSinceHit / knockBackDuration);
+    
+    // Knock back effect
+    obstacle.position.copy(hitData.originalPos);
+    obstacle.position.addScaledVector(hitData.knockBackDir, knockBackAmount);
+    
+    // Spin effect
+    obstacle.rotation.x = hitData.originalRot.x + Math.sin(timeSinceHit * 12) * 0.8;
+    obstacle.rotation.z = hitData.originalRot.z + Math.cos(timeSinceHit * 15) * 0.8;
+    
+    // Scale wobble effect
+    const scaleAmount = 1 + Math.sin(timeSinceHit * 18) * 0.15;
+    obstacle.scale.copy(hitData.originalScale).multiplyScalar(scaleAmount);
+  } else {
+    // Return to original state after knock back
+    obstacle.position.copy(hitData.originalPos);
+    obstacle.rotation.copy(hitData.originalRot);
+    obstacle.scale.copy(hitData.originalScale);
+  }
+}
+
+/**
+ * showObstaclePenaltyFeedback(speedAmount)
+ * ────────────────────────────────────────
+ * Shows a temporary UI message when the player hits an obstacle.
+ * Displays "-XX KM/H" in the center of the screen, fades out.
+ */
+function showObstaclePenaltyFeedback(speedAmount) {
+  const feedbackEl = document.createElement('div');
+  feedbackEl.className = 'obstacle-penalty-feedback';
+  feedbackEl.textContent = `-${speedAmount} KM/H`;
+  feedbackEl.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 3.5rem;
+    font-weight: bold;
+    color: #ff6600;
+    text-shadow: 0 0 20px rgba(255, 102, 0, 0.8), 0 0 10px rgba(255, 51, 0, 1);
+    font-family: monospace;
+    z-index: 999;
+    pointer-events: none;
+    letter-spacing: 2px;
+    animation: obstacleHitFeedback 1.2s ease-out forwards;
+  `;
+  document.body.appendChild(feedbackEl);
+
+  // Remove element after animation completes
+  setTimeout(() => feedbackEl.remove(), 1200);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1028,6 +1274,118 @@ function updatePowerUps(delta) {
       powerUps.splice(idx, 1);
     }
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Coins — collectible gold coins for points
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * createCoin(x, z)
+ * ─────────────────
+ * Builds a low-poly shiny gold coin using TorusGeometry.
+ * Emissive material makes it glow slightly.
+ * Returns a Group with the coin positioned at (x, y, z).
+ */
+function createCoin(x, z) {
+  const group = new THREE.Group();
+
+  // Main coin body: flat torus (looks like a coin viewed at an angle)
+  const coinGeo = new THREE.TorusGeometry(0.30, 0.08, 8, 32);
+  const coinMat = new THREE.MeshStandardMaterial({
+    color: 0xffdd00,           // bright yellow-gold
+    emissive: 0xffaa00,        // warm orange glow
+    emissiveIntensity: 1.8,
+    metalness: 0.9,            // shiny like metal
+    roughness: 0.25            // some shine
+  });
+  const coin = new THREE.Mesh(coinGeo, coinMat);
+  coin.rotation.x = Math.PI / 2.5;  // tilt coin so it's visible
+  group.add(coin);
+
+  // Small bright sphere in the center for extra bling
+  const sparkGeo = new THREE.SphereGeometry(0.08, 4, 4);
+  const sparkMat = new THREE.MeshStandardMaterial({
+    color: 0xffff99,
+    emissive: 0xffff44,
+    emissiveIntensity: 2.5,
+    metalness: 1.0
+  });
+  const spark = new THREE.Mesh(sparkGeo, sparkMat);
+  spark.position.y = 0.05;
+  group.add(spark);
+
+  // Position the coin above the road
+  group.position.set(x, 0.8, z);
+  group.userData.isCoin = true;
+  scene.add(group);
+  return group;
+}
+
+/**
+ * spawnCoin()
+ * ───────────
+ * Randomly spawns a coin on one of the three lanes.
+ * Coins spawn ahead of the player at a random distance.
+ */
+function spawnCoin() {
+  const x = LANES[Math.floor(Math.random() * LANES.length)];
+  const z = playerCar.position.z - 25 - Math.random() * 35;
+  coins.push(createCoin(x, z));
+}
+
+/**
+ * updateCoins(delta)
+ * ──────────────────
+ * • Scrolls coins toward the player
+ * • Animates coin rotation and bob
+ * • Detects collection (distance check)
+ * • Removes collected or despawned coins
+ */
+function updateCoins(delta) {
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const coin = coins[i];
+
+    // Move coin with the road
+    coin.position.z += gameState.currentVelocity * delta;
+
+    // Spin the coin on Y axis (rotation around vertical)
+    coin.rotation.y += 0.12;
+
+    // Bob up and down gently (floating effect)
+    coin.position.y = 0.8 + Math.sin(gameState.time * 3.5 + i * 0.3) * 0.25;
+
+    // Despawn when well past the player
+    if (coin.position.z > playerCar.position.z + 70) {
+      scene.remove(coin);
+      coins.splice(i, 1);
+      continue;
+    }
+
+    // Collision detection: player collects coin
+    const dist = playerCar.position.distanceTo(coin.position);
+    if (dist < 1.0) {
+      collectCoin(coin, i);
+    }
+  }
+}
+
+/**
+ * collectCoin(coin, index)
+ * ────────────────────────
+ * Called when player touches a coin.
+ * • Remove coin from scene
+ * • Increment counter
+ * • Update HUD
+ */
+function collectCoin(coin, index) {
+  coinsCollected++;
+  scene.remove(coin);
+  coins.splice(index, 1);
+  updateCoinUI();
+
+  // Optional: brief visual feedback at coin position
+  // (you could add a particle effect or sound here later)
 }
 
 // ─────────────────────────────────────────────────────────────

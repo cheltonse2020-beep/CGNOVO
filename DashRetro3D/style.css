@@ -560,3 +560,28 @@ html, body {
 #cam-label.visible {
   opacity: 1;
 }
+
+/* =====================================================
+   OBSTACLE PENALTY FEEDBACK — speed reduction indicator
+   Shows "-XX KM/H" when hitting orange obstacles
+   ===================================================== */
+@keyframes obstacleHitFeedback {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.6);
+    color: #ff3300;
+    text-shadow: 0 0 30px rgba(255, 51, 0, 1), 0 0 60px rgba(255, 102, 0, 1);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -80%) scale(1.2);
+    color: #ff6600;
+    text-shadow: 0 0 40px rgba(255, 102, 0, 1), 0 0 80px rgba(255, 51, 0, 0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(0.8);
+    color: #ff6600;
+    text-shadow: 0 0 20px rgba(255, 102, 0, 0.3), 0 0 40px rgba(255, 51, 0, 0);
+  }
+}
