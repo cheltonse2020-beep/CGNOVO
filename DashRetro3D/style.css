@@ -348,6 +348,116 @@ html, body {
   transform: scale(0.95);
 }
 
+/* ---------- Pause button ---------- */
+#pause-btn {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1000;
+  width: 48px;
+  height: 48px;
+  background: rgba(0, 10, 25, 0.85);
+  border: 1px solid rgba(0, 200, 255, 0.55);
+  border-radius: 8px;
+  color: #00c8ff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 12px rgba(0, 200, 255, 0.35);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s, border-color 0.15s;
+}
+
+#pause-btn:hover {
+  background: rgba(0, 200, 255, 0.15);
+  box-shadow: 0 0 22px rgba(0, 200, 255, 0.65);
+  transform: scale(1.06);
+}
+
+#pause-btn:active {
+  transform: scale(0.95);
+}
+
+#pause-btn.paused {
+  border-color: #ff8800;
+  color: #ff8800;
+  box-shadow: 0 0 12px rgba(255, 136, 0, 0.5);
+}
+
+#pause-btn.paused:hover {
+  background: rgba(255, 136, 0, 0.15);
+  box-shadow: 0 0 22px rgba(255, 136, 0, 0.8);
+}
+
+/* ---------- Pause overlay ---------- */
+#pause-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 998;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+#pause-overlay.visible {
+  display: flex;
+}
+
+.pause-panel {
+  background: rgba(10, 5, 30, 0.95);
+  border: 2px solid #ff8800;
+  border-radius: 12px;
+  padding: 2.5rem 3rem;
+  text-align: center;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 40px rgba(255, 136, 0, 0.3), 0 8px 32px rgba(0, 0, 0, 0.6);
+  animation: pause-popup 0.3s ease-out forwards;
+}
+
+@keyframes pause-popup {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pause-title {
+  font-size: 2.2rem;
+  font-weight: bold;
+  color: #ff8800;
+  text-shadow: 0 0 20px #ff8800;
+  margin-bottom: 1rem;
+  letter-spacing: 0.1em;
+}
+
+.pause-text {
+  font-size: 0.95rem;
+  color: #cce8ff;
+  margin-bottom: 1.8rem;
+  letter-spacing: 0.05em;
+}
+
+.pause-key {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  background: rgba(255, 136, 0, 0.1);
+  border: 1px solid rgba(255, 136, 0, 0.4);
+  border-radius: 4px;
+  color: #ff8800;
+  font-size: 0.9rem;
+  font-weight: bold;
+  margin: 0 0.3rem;
+}
+
 /* ---------- Controls panel ---------- */
 #hud-controls-panel {
   position: fixed;
@@ -583,5 +693,38 @@ html, body {
     transform: translate(-50%, -120%) scale(0.8);
     color: #ff6600;
     text-shadow: 0 0 20px rgba(255, 102, 0, 0.3), 0 0 40px rgba(255, 51, 0, 0);
+  }
+}
+
+/* =====================================================
+   POLICE CHASE — Banners and HUD
+   ===================================================== */
+@keyframes police-chase-pulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  100% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes police-escape-pulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
   }
 }
