@@ -240,6 +240,133 @@ const crashEffect = {
   flashEl:   null,    // reference to the red flash DOM element
 };
 
+// ─────────────────────────────────────────────────────────────
+// PERSISTENT RECORDS SYSTEM (localStorage)
+// ─────────────────────────────────────────────────────────────
+const RECORDS_STORAGE_KEY = 'dashRetro3D_records';
+const RECORDS_CONFIG = {
+  UPDATE_THROTTLE: 0.1, // Atualizar HUD a cada 100ms (zero overhead)
+  NEW_RECORD_DISPLAY: 3.5, // Duração da animação (segundos)
+};
+
+let lastRecordHUDUpdate = 0;
+let newRecordAnimation = { active: false, timer: 0 };
+
+/**
+ * recordsModule
+ * ─────────────
+ * Sistema modular para gerenciar recordes com localStorage
+ * Funções: loadRecord(), saveRecord(), updateRecord(), resetRecord(), getFormattedDate()
+ */
+const recordsModule = {
+  /**
+   * Carrega recordes do localStorage
+   * Retorna { timeRecord, overtakesRecord } ou padrão
+   */
+  loadRecord() {
+    try {
+      const data = localStorage.getItem(RECORDS_STORAGE_KEY);
+      if (!data) return this.getDefaultRecords();
+      const parsed = JSON.parse(data);
+      return {
+        timeRecord: parsed.timeRecord || 0,
+        timeDate: parsed.timeDate || '',
+        overtakesRecord: parsed.overtakesRecord || 0,
+        overtakesDate: parsed.overtakesDate || '',
+      };
+    } catch (e) {
+      console.warn('⚠️ Erro ao carregar recordes:', e);
+      return this.getDefaultRecords();
+    }
+  },
+
+  /**
+   * Salva recordes no localStorage
+   * Chamado automaticamente por updateRecord()
+   */
+  saveRecord(records) {
+    try {
+      localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(records));
+    } catch (e) {
+      console.warn('⚠️ Erro ao salvar recordes:', e);
+    }
+  },
+
+  /**
+   * Atualiza um recorde se a pontuação atual for melhor
+   * Retorna { isNewRecord: boolean, recordType: 'time'|'overtakes'|'both'|null }
+   */
+  updateRecord(currentTime, currentOvertakes) {
+    const records = this.loadRecord();
+    let isNewRecord = false;
+    let recordType = null;
+
+    // Verificar tempo
+    if (currentTime > records.timeRecord) {
+      records.timeRecord = currentTime;
+      records.timeDate = this.getFormattedDate();
+      isNewRecord = true;
+      recordType = 'time';
+    }
+
+    // Verificar ultrapassagens
+    if (currentOvertakes > records.overtakesRecord) {
+      records.overtakesRecord = currentOvertakes;
+      records.overtakesDate = this.getFormattedDate();
+      isNewRecord = true;
+      recordType = recordType === 'time' ? 'both' : 'overtakes';
+    }
+
+    if (isNewRecord) {
+      this.saveRecord(records);
+    }
+
+    return { isNewRecord, recordType, records };
+  },
+
+  /**
+   * Reseta todos os recordes
+   */
+  resetRecord() {
+    try {
+      localStorage.removeItem(RECORDS_STORAGE_KEY);
+    } catch (e) {
+      console.warn('⚠️ Erro ao resetar recordes:', e);
+    }
+  },
+
+  /**
+   * Formata data/hora atual para exibição
+   */
+  getFormattedDate() {
+    const now = new Date();
+    const date = now.toLocaleDateString('pt-PT', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+    });
+    const time = now.toLocaleTimeString('pt-PT', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return `${date} ${time}`;
+  },
+
+  /**
+   * Retorna objeto padrão de recordes vazios
+   */
+  getDefaultRecords() {
+    return {
+      timeRecord: 0,
+      timeDate: '—',
+      overtakesRecord: 0,
+      overtakesDate: '—',
+    };
+  },
+};
+
+// Carrega recordes na inicialização
+let records = recordsModule.loadRecord();
 
 // ─────────────────────────────────────────────────────────────
 // Three.js scene bootstrap
@@ -386,9 +513,34 @@ function initScene() {
         <div id="headlight-mode" style="color:#ffff88;">FAROL: OFF</div>
         <div id="time-display">TIME: DAY ☀️</div>
       </div>
+
+      <!-- RECORDES (Records HUD) -->
+      <div class="hud-records">
+        <div class="hud-records-title">⚡ RECORDES</div>
+        <div class="record-item">
+          <span class="record-label">TEMPO:</span>
+          <span id="record-time" class="record-value">—</span>
+          <div id="record-time-date" class="record-date">—</div>
+        </div>
+        <div class="record-item">
+          <span class="record-label">ULTRAPASSAGENS:</span>
+          <span id="record-overtakes" class="record-value">—</span>
+          <div id="record-overtakes-date" class="record-date">—</div>
+        </div>
+        <button id="reset-records-btn" class="reset-btn" title="Resetar recordes">🔄</button>
+      </div>
+    </div>
+
+    <!-- NEW RECORD ANIMATION OVERLAY -->
+    <div id="new-record-overlay" class="new-record-overlay hidden">
+      <div class="new-record-content">
+        <div class="new-record-text">🎉 NOVO RECORDE! 🎉</div>
+        <div class="new-record-pulse"></div>
+      </div>
     </div>
   `;
   document.body.appendChild(hud);
+
 
   // ── Pause button ──────────────────────────────────────────
   const pauseBtn = document.createElement('button');
@@ -437,6 +589,18 @@ function initScene() {
   // Toggle: abrir/fechar painel ao clicar no botão ☰
   menuBtn.addEventListener('click', () => {
     ctrlPanel.classList.toggle('open');
+  });
+
+  // ── Reset Records Button ───────────────────────────────────
+  // Botão para resetar recordes com confirmação
+  const resetBtn = document.getElementById('reset-records-btn');
+  resetBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Evita propagação de cliques
+    if (confirm('⚠️ Tem a certeza que quer apagar todos os recordes?\n\nEsta ação não pode ser desfeita.')) {
+      recordsModule.resetRecord();
+      records = recordsModule.getDefaultRecords();
+      updateRecordsHUD();
+    }
   });
 
   // Create pause overlay
@@ -698,6 +862,10 @@ function initScene() {
     // -- Update HUD ----
     updateHUD();
 
+    // -- Update Records HUD & Animations ----
+    updateRecordsHUD();
+    updateNewRecordAnimation(delta);
+
     // -- Wheel rotation (player car) ────────────────────────
     // Each wheel has a spinner Group (isWheelSpin = true) whose
     // rotation.z = π/2 re-maps the cylinder so its axle aligns
@@ -898,6 +1066,7 @@ function checkCollisions() {
  * 1. Freezes all gameplay (isGameOver = true).
  * 2. Zeroes velocities so nothing moves.
  * 3. Triggers the crash visual effect (tilt + shake + red flash).
+ * 4. Checks and updates records if current run is better than previous.
  * The Game Over overlay is shown after crashEffect.duration seconds.
  */
 function gameOver() {
@@ -908,6 +1077,20 @@ function gameOver() {
   gameState.currentVelocity = 0;
   gameState.baseVelocity    = 0;
   enemyCars.forEach(ec => { ec.velocity = 0; });
+
+  // ── Update Records ────────────────────────────────────────
+  // Verifica se o jogador bateu um recorde e salva
+  const { isNewRecord, recordType } = recordsModule.updateRecord(
+    gameState.time,
+    gameState.overtakes
+  );
+
+  // Se houve novo recorde, carrega a versão atualizada e anima
+  if (isNewRecord) {
+    records = recordsModule.loadRecord();
+    updateRecordsHUD();
+    triggerNewRecordAnimation();
+  }
 
   // Activate crash visual effect
   crashEffect.active = true;
@@ -1135,6 +1318,82 @@ function updateCoinUI() {
   const el = document.getElementById('coins-value');
   if (el) el.textContent = coinsCollected;
 }
+
+/**
+ * updateRecordsHUD()
+ * ──────────────────
+ * Atualiza a exibição dos recordes no HUD
+ * 📊 OTIMIZAÇÃO: Throttle de 100ms para evitar excessive DOM manipulation
+ */
+function updateRecordsHUD() {
+  const now = gameState.time;
+  if (now - lastRecordHUDUpdate < RECORDS_CONFIG.UPDATE_THROTTLE) return;
+  lastRecordHUDUpdate = now;
+
+  // Formatar tempo (segundos para MM:SS.m)
+  const formatTime = (seconds) => {
+    if (seconds === 0) return '—';
+    const mins = Math.floor(seconds / 60);
+    const secs = (seconds % 60).toFixed(1);
+    return `${mins}:${String(Math.floor(secs)).padStart(2, '0')}.${String(Math.round((seconds % 1) * 10))}`;
+  };
+
+  // Atualizar tempo
+  const timeEl = document.getElementById('record-time');
+  const timeFormatted = formatTime(records.timeRecord);
+  if (timeEl && timeEl.textContent !== timeFormatted) {
+    timeEl.textContent = timeFormatted;
+  }
+
+  const timeDateEl = document.getElementById('record-time-date');
+  if (timeDateEl && timeDateEl.textContent !== records.timeDate) {
+    timeDateEl.textContent = records.timeDate;
+  }
+
+  // Atualizar ultrapassagens
+  const overtEl = document.getElementById('record-overtakes');
+  const overtFormatted = records.overtakesRecord === 0 ? '—' : String(records.overtakesRecord);
+  if (overtEl && overtEl.textContent !== overtFormatted) {
+    overtEl.textContent = overtFormatted;
+  }
+
+  const overtDateEl = document.getElementById('record-overtakes-date');
+  if (overtDateEl && overtDateEl.textContent !== records.overtakesDate) {
+    overtDateEl.textContent = records.overtakesDate;
+  }
+}
+
+/**
+ * triggerNewRecordAnimation()
+ * ──────────────────────────
+ * Ativa a animação visual quando um novo recorde é atingido
+ * 🎉 Efeito de pulse + brilho + overlay
+ */
+function triggerNewRecordAnimation() {
+  const overlay = document.getElementById('new-record-overlay');
+  if (!overlay) return;
+
+  overlay.classList.remove('hidden');
+  newRecordAnimation.active = true;
+  newRecordAnimation.timer = 0;
+
+  // Auto-hide após duração
+  setTimeout(() => {
+    overlay.classList.add('hidden');
+    newRecordAnimation.active = false;
+  }, RECORDS_CONFIG.NEW_RECORD_DISPLAY * 1000);
+}
+
+/**
+ * updateNewRecordAnimation()
+ * ──────────────────────────
+ * Atualiza frames da animação de novo recorde (chamado no loop principal)
+ */
+function updateNewRecordAnimation(delta) {
+  if (!newRecordAnimation.active) return;
+  newRecordAnimation.timer += delta;
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Day/Night Cycle
