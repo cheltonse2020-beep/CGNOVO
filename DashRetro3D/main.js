@@ -129,7 +129,7 @@ function returnToMenu() {
 /**
  * togglePause()
  * ─────────────
- * Toggles pause state: pauses/resumes the game.
+ * Toggles pause state: pauses/resumes the game and shows pause menu.
  */
 function togglePause() {
   isGamePaused = !isGamePaused;
@@ -144,6 +144,212 @@ function togglePause() {
     pauseBtn.classList.remove('paused');
     pauseBtn.textContent = '⏸';
     if (overlay) overlay.classList.remove('visible');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAUSE MENU & LIGHTING SYSTEM FUNCTIONS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * pauseGame()
+ * ───────────
+ * Pausa o jogo e mostra menu de pausa
+ */
+function pauseGame() {
+  isGamePaused = true;
+  const pauseBtn = document.getElementById('pause-btn');
+  const overlay = document.getElementById('pause-overlay');
+  if (pauseBtn) {
+    pauseBtn.classList.add('paused');
+    pauseBtn.textContent = '▶';
+  }
+  if (overlay) overlay.classList.add('visible');
+}
+
+/**
+ * resumeGame()
+ * ────────────
+ * Retoma o jogo e fecha menu de pausa
+ */
+function resumeGame() {
+  isGamePaused = false;
+  const pauseBtn = document.getElementById('pause-btn');
+  const overlay = document.getElementById('pause-overlay');
+  if (pauseBtn) {
+    pauseBtn.classList.remove('paused');
+    pauseBtn.textContent = '⏸';
+  }
+  if (overlay) overlay.classList.remove('visible');
+}
+
+/**
+ * restartGame()
+ * ─────────────
+ * Reinicia a partida (mesmo que ao clicar REPLAY)
+ */
+function restartGame() {
+  const overlay = document.getElementById('pause-overlay');
+  if (overlay) overlay.classList.remove('visible');
+
+  // Reset crash effect
+  crashEffect.active = false;
+  crashEffect.timer = 0;
+
+  // Reset game state (igual ao REPLAY)
+  isGameOver = false;
+  isGamePaused = false;
+  gameState.time = 0;
+  gameState.currentVelocity = 0;
+  gameState.baseVelocity = 12;
+  gameState.overtakes = 0;
+  gameState.score = 0;
+  gameState.nitroCharge = 100;
+  gameState.nitroActive = false;
+  gameState.invulnerable = false;
+  gameState.invulnerableTime = 0;
+  gameState.isJumping = false;
+  gameState.jumpVelocity = 0;
+  gameState.jumpsAvailable = 3;
+  gameState.collisions = 0;
+  gameState.obstacleHit = false;
+  gameState.lastObstacleHitTime = -999;
+  gameState.speedPenaltyActive = false;
+  gameState.speedPenaltyTimer = 0;
+
+  // Reset player car position
+  playerCar.position.set(0, 0, 5);
+  playerCar.rotation.set(0, 0, 0);
+  targetX = 0;
+  currentTurnTilt = 0;
+
+  // Clear arrays
+  enemyCars = [];
+  obstacles = [];
+  powerUps = [];
+  jumpPickups = [];
+  coins = [];
+  coinsCollected = 0;
+  policeCars = [];
+  policeConvoyActive = false;
+  policeConvoyTimer = 0;
+  nextPoliceEventTime = 45;
+  policeChaseActive = false;
+  policeChaseTimer = 0;
+  policeTriggerIndex = 0;
+  policeAggressiveness = 1.0;
+  policeChaseMultiplier = 1.0;
+
+  // Update HUD
+  updateHUD();
+
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) {
+    pauseBtn.classList.remove('paused');
+    pauseBtn.textContent = '⏸';
+  }
+}
+
+/**
+ * setLightLevel(level)
+ * ────────────────────
+ * Altera o nível de iluminação: 'min', 'medium', 'max'
+ */
+function setLightLevel(level) {
+  if (!LIGHTING_LEVELS[level] || !ambientLight || !dirLight) return;
+
+  const config = LIGHTING_LEVELS[level];
+  currentLightLevel = level;
+
+  // Atualizar luzes
+  ambientLight.intensity = config.ambientIntensity;
+  dirLight.intensity = config.dirIntensity;
+
+  // Atualizar exposure do renderer (se suportado)
+  if (renderer.toneMappingExposure !== undefined) {
+    renderer.toneMappingExposure = config.exposureMultiplier;
+  }
+
+  // Atualizar faróis do carro (headlights)
+  headlightSpots.forEach(spot => {
+    spot.intensity = config.ambientIntensity * 2; // Faróis respondem à iluminação geral
+  });
+
+  // Salvar preferência
+  saveLightLevel(level);
+
+  // Atualizar UI (destacar botão selecionado)
+  updateLightButtonsUI(level);
+}
+
+/**
+ * saveLightLevel(level)
+ * ─────────────────────
+ * Salva o nível de iluminação no localStorage
+ */
+function saveLightLevel(level) {
+  try {
+    localStorage.setItem(LIGHT_LEVEL_STORAGE_KEY, level);
+  } catch (e) {
+    console.warn('⚠️ Erro ao salvar nível de iluminação:', e);
+  }
+}
+
+/**
+ * loadLightLevel()
+ * ────────────────
+ * Carrega o nível de iluminação salvo ou usa padrão 'medium'
+ */
+function loadLightLevel() {
+  try {
+    const saved = localStorage.getItem(LIGHT_LEVEL_STORAGE_KEY);
+    if (saved && LIGHTING_LEVELS[saved]) {
+      currentLightLevel = saved;
+      return saved;
+    }
+  } catch (e) {
+    console.warn('⚠️ Erro ao carregar nível de iluminação:', e);
+  }
+  return 'medium';
+}
+
+/**
+ * updateLightButtonsUI(activeLevel)
+ * ──────────────────────────────────
+ * Destaca o botão de iluminação selecionado
+ */
+function updateLightButtonsUI(activeLevel) {
+  ['min', 'medium', 'max'].forEach(level => {
+    const btn = document.getElementById(`light-btn-${level}`);
+    if (btn) {
+      if (level === activeLevel) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  });
+}
+
+/**
+ * exitGame()
+ * ──────────
+ * Sai do jogo e volta para o menu principal
+ */
+function exitGame() {
+  returnToMenu();
+}
+
+/**
+ * togglePauseMenu()
+ * ─────────────────
+ * Alternate: toggles pause (coordena com novo menu)
+ */
+function togglePauseMenu() {
+  if (isGamePaused) {
+    resumeGame();
+  } else {
+    pauseGame();
   }
 }
 
@@ -223,6 +429,35 @@ let scene, camera, renderer, playerCar, clock;
 let isGameOver = false;   // stops the update logic when true
 let isGamePaused = false; // pause state
 let headlightSpots = [];  // [leftSpotLight, rightSpotLight] for the player car
+
+// ─────────────────────────────────────────────────────────────
+// LIGHTING SYSTEM — Global references for pause menu control
+// ─────────────────────────────────────────────────────────────
+let ambientLight, dirLight;  // Global refs for adjusting lighting levels
+
+const LIGHTING_LEVELS = {
+  min: {
+    ambientIntensity: 0.4,
+    dirIntensity: 0.8,
+    exposureMultiplier: 0.7,
+    label: 'MÍNIMA',
+  },
+  medium: {
+    ambientIntensity: 1.2,
+    dirIntensity: 1.8,
+    exposureMultiplier: 1.0,
+    label: 'MÉDIA',
+  },
+  max: {
+    ambientIntensity: 2.0,
+    dirIntensity: 2.5,
+    exposureMultiplier: 1.3,
+    label: 'MÁXIMA',
+  },
+};
+
+let currentLightLevel = 'medium'; // default level
+const LIGHT_LEVEL_STORAGE_KEY = 'dashRetro3D_lightLevel';
 
 // ── Camera system ────────────────────────────────────────────
 // 0 = Chase (3rd person)  1 = Top (ortho)  2 = Hood  3 = Cinematic
@@ -425,10 +660,10 @@ function initScene() {
   // 📊 OTIMIZAÇÃO: Reduzir intesidade de luz ambiente
   // - Apenas 1 AmbientLight (sem excessos)
   // - Apenas 1 DirectionalLight com shadowMap otimizado
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);  // Reduzido de 2 → 1.2
+  ambientLight = new THREE.AmbientLight(0xffffff, 1.2);  // Reduzido de 2 → 1.2
   scene.add(ambientLight);
 
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);  // Reduzido de 2.5 → 1.8
+  dirLight = new THREE.DirectionalLight(0xffffff, 1.8);  // Reduzido de 2.5 → 1.8
   dirLight.position.set(50, 80, 30);
   dirLight.castShadow = true;
   // 📊 OTIMIZAÇÃO CRÍTICA: Reduzir shadowMapSize
@@ -442,6 +677,10 @@ function initScene() {
   dirLight.shadow.camera.bottom = -100;
   dirLight.shadow.bias = 0.0005;  // Reduzir shadow acne
   scene.add(dirLight);
+
+  // ── Load saved light level and apply ──────────────────────
+  const savedLightLevel = loadLightLevel();
+  setLightLevel(savedLightLevel);
 
   // ── Build everything ──────────────────────────────────────
   buildRoad(scene);
@@ -603,21 +842,53 @@ function initScene() {
     }
   });
 
-  // Create pause overlay
+  // Create pause overlay with 6-button menu
   const pauseOverlay = document.createElement('div');
   pauseOverlay.id = 'pause-overlay';
   pauseOverlay.innerHTML = `
     <div class="pause-panel">
-      <div class="pause-title">PAUSED</div>
-      <div class="pause-text">Press <span class="pause-key">P</span> or click the button to resume</div>
+      <div class="pause-title">⏸ PAUSED</div>
+      <div class="pause-menu">
+        <button id="pause-continue" class="pause-menu-btn continue-btn">▶ Continuar jogo</button>
+        <button id="pause-restart" class="pause-menu-btn restart-btn">↺ Reiniciar jogo</button>
+        <button id="light-btn-min" class="pause-menu-btn light-btn">◐ Iluminação mínima</button>
+        <button id="light-btn-medium" class="pause-menu-btn light-btn">◑ Iluminação média</button>
+        <button id="light-btn-max" class="pause-menu-btn light-btn">◕ Iluminação máxima</button>
+        <button id="pause-exit" class="pause-menu-btn exit-btn">⌂ Sair do jogo</button>
+      </div>
     </div>
   `;
   document.body.appendChild(pauseOverlay);
 
-  // Close pause on overlay click
+  // Add event listeners to pause menu buttons
+  document.getElementById('pause-continue').addEventListener('click', () => {
+    resumeGame();
+  });
+
+  document.getElementById('pause-restart').addEventListener('click', () => {
+    restartGame();
+  });
+
+  document.getElementById('light-btn-min').addEventListener('click', () => {
+    setLightLevel('min');
+  });
+
+  document.getElementById('light-btn-medium').addEventListener('click', () => {
+    setLightLevel('medium');
+  });
+
+  document.getElementById('light-btn-max').addEventListener('click', () => {
+    setLightLevel('max');
+  });
+
+  document.getElementById('pause-exit').addEventListener('click', () => {
+    exitGame();
+  });
+
+  // Close pause on overlay background click (not on buttons)
   pauseOverlay.addEventListener('click', (e) => {
     if (e.target === pauseOverlay && isGamePaused) {
-      togglePause();
+      resumeGame();
     }
   });
 

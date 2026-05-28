@@ -458,6 +458,116 @@ html, body {
   margin: 0 0.3rem;
 }
 
+/* ---------- Pause Menu Buttons ---------- */
+.pause-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 1.5rem;
+}
+
+.pause-menu-btn {
+  padding: 0.85rem 1.5rem;
+  border: 2px solid #00d4ff;
+  background: rgba(0, 212, 255, 0.05);
+  color: #00d4ff;
+  font-size: 1rem;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  border-radius: 6px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.2s ease;
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.1);
+}
+
+.pause-menu-btn:hover {
+  background: rgba(0, 212, 255, 0.15);
+  box-shadow: 0 0 25px rgba(0, 212, 255, 0.4);
+  text-shadow: 0 0 15px rgba(0, 212, 255, 0.8);
+  transform: translateY(-2px);
+}
+
+.pause-menu-btn:active {
+  transform: translateY(0px);
+}
+
+/* Lighting buttons - default state */
+.light-btn {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.05);
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.1);
+}
+
+.light-btn:hover {
+  background: rgba(0, 255, 136, 0.15);
+  box-shadow: 0 0 25px rgba(0, 255, 136, 0.4);
+  text-shadow: 0 0 15px rgba(0, 255, 136, 0.8);
+}
+
+/* Active lighting button - highlighted */
+.light-btn.active {
+  border-color: #ffff00;
+  color: #ffff00;
+  background: rgba(255, 255, 0, 0.15);
+  text-shadow: 0 0 15px rgba(255, 255, 0, 0.8);
+  box-shadow: 0 0 30px rgba(255, 255, 0, 0.5), inset 0 0 10px rgba(255, 255, 0, 0.1);
+}
+
+.light-btn.active:hover {
+  box-shadow: 0 0 40px rgba(255, 255, 0, 0.6), inset 0 0 15px rgba(255, 255, 0, 0.2);
+}
+
+/* Continue button - green accent */
+.continue-btn {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.08);
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.15);
+}
+
+.continue-btn:hover {
+  background: rgba(0, 255, 136, 0.2);
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.9);
+}
+
+/* Restart button - cyan accent */
+.restart-btn {
+  border-color: #00d4ff;
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.08);
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.15);
+}
+
+.restart-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.9);
+}
+
+/* Exit button - red accent */
+.exit-btn {
+  border-color: #ff2d78;
+  color: #ff2d78;
+  background: rgba(255, 45, 120, 0.08);
+  text-shadow: 0 0 10px rgba(255, 45, 120, 0.6);
+  box-shadow: 0 0 15px rgba(255, 45, 120, 0.15);
+  margin-top: 0.5rem; /* Extra spacing before exit */
+}
+
+.exit-btn:hover {
+  background: rgba(255, 45, 120, 0.2);
+  box-shadow: 0 0 30px rgba(255, 45, 120, 0.5);
+  text-shadow: 0 0 20px rgba(255, 45, 120, 0.9);
+}
+
 /* ---------- Controls panel ---------- */
 #hud-controls-panel {
   position: fixed;
