@@ -245,20 +245,24 @@ html, body {
   font-weight: bold;
   color: #00f5ff;
   text-shadow:
-    0 0 8px #00f5ff,
-    0 0 16px #00f5ff,
-    0 0 24px #0088ff;
-  letter-spacing: 0.08em;
-  min-width: 240px;
-  padding: 0.7rem 1.2rem;
-  border: 2px solid #00f5ff;
-  border-radius: 4px;
-  background: rgba(0, 20, 40, 0.7);
-  box-shadow: inset 0 0 10px rgba(0, 245, 255, 0.1);
-  animation: hud-pulse 2s ease-in-out infinite;
+    0 0 12px #00f5ff,
+    0 0 24px #00f5ff,
+    0 0 36px #0088ff,
+    0 0 60px rgba(0, 136, 255, 0.5);
+  letter-spacing: 0.1em;
+  min-width: 260px;
+  padding: 1rem 1.5rem;
+  border: 3px solid #00f5ff;
+  border-radius: 8px;
+  background: rgba(0, 20, 60, 0.9);
+  box-shadow: 
+    inset 0 0 15px rgba(0, 245, 255, 0.15),
+    0 0 25px rgba(0, 245, 255, 0.4),
+    0 0 50px rgba(0, 136, 255, 0.2);
+  animation: hud-pulse-enhanced 2s ease-in-out infinite;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
 .hud-label {
@@ -409,34 +413,63 @@ html, body {
 }
 
 .pause-panel {
-  background: rgba(10, 5, 30, 0.95);
-  border: 2px solid #ff8800;
-  border-radius: 12px;
-  padding: 2.5rem 3rem;
+  background: rgba(10, 5, 30, 0.98);
+  border: 3px solid #ff8800;
+  border-radius: 16px;
+  padding: 3rem 3.5rem;
   text-align: center;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 0 40px rgba(255, 136, 0, 0.3), 0 8px 32px rgba(0, 0, 0, 0.6);
-  animation: pause-popup 0.3s ease-out forwards;
+  backdrop-filter: blur(16px);
+  box-shadow: 
+    0 0 50px rgba(255, 136, 0, 0.5),
+    0 0 100px rgba(255, 136, 0, 0.25),
+    0 8px 32px rgba(0, 0, 0, 0.8),
+    inset 0 0 30px rgba(255, 136, 0, 0.08);
+  animation: pause-popup 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 @keyframes pause-popup {
   from {
     opacity: 0;
-    transform: scale(0.85);
+    transform: scale(0.75) rotateY(-15deg);
   }
   to {
     opacity: 1;
+    transform: scale(1) rotateY(0);
+  }
+}
+
+@keyframes title-glow {
+  0%, 100% {
+    text-shadow: 0 0 20px #ff8800, 0 0 40px rgba(255, 136, 0, 0.8), 0 0 60px rgba(255, 100, 0, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 30px #ff8800, 0 0 60px rgba(255, 136, 0, 1), 0 0 90px rgba(255, 100, 0, 0.7);
+  }
+}
+
+@keyframes active-pulse {
+  0% {
+    transform: scale(0.95);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
     transform: scale(1);
   }
 }
 
 .pause-title {
-  font-size: 2.2rem;
+  font-size: 2.6rem;
   font-weight: bold;
   color: #ff8800;
-  text-shadow: 0 0 20px #ff8800;
-  margin-bottom: 1rem;
-  letter-spacing: 0.1em;
+  text-shadow: 
+    0 0 20px #ff8800,
+    0 0 40px rgba(255, 136, 0, 0.8),
+    0 0 60px rgba(255, 100, 0, 0.5);
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.15em;
+  animation: title-glow 1.5s ease-in-out infinite;
 }
 
 .pause-text {
@@ -462,110 +495,145 @@ html, body {
 .pause-menu {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
-  margin-top: 1.5rem;
+  gap: 0.9rem;
+  margin-top: 2rem;
 }
 
 .pause-menu-btn {
-  padding: 0.85rem 1.5rem;
+  padding: 1rem 1.8rem;
   border: 2px solid #00d4ff;
-  background: rgba(0, 212, 255, 0.05);
+  background: rgba(0, 212, 255, 0.08);
   color: #00d4ff;
-  font-size: 1rem;
+  font-size: 1.05rem;
   font-weight: bold;
   font-family: 'Courier New', monospace;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  transition: all 0.2s ease;
-  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
-  box-shadow: 0 0 15px rgba(0, 212, 255, 0.1);
+  letter-spacing: 0.08em;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  text-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+  box-shadow: 
+    0 0 20px rgba(0, 212, 255, 0.25),
+    inset 0 0 12px rgba(0, 212, 255, 0.05);
 }
 
 .pause-menu-btn:hover {
-  background: rgba(0, 212, 255, 0.15);
-  box-shadow: 0 0 25px rgba(0, 212, 255, 0.4);
-  text-shadow: 0 0 15px rgba(0, 212, 255, 0.8);
-  transform: translateY(-2px);
+  background: rgba(0, 212, 255, 0.2);
+  box-shadow: 
+    0 0 35px rgba(0, 212, 255, 0.5),
+    inset 0 0 15px rgba(0, 212, 255, 0.15),
+    0 0 60px rgba(0, 212, 255, 0.2);
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.95);
+  transform: translateY(-4px);
 }
 
 .pause-menu-btn:active {
-  transform: translateY(0px);
+  transform: translateY(-1px);
 }
 
 /* Lighting buttons - default state */
 .light-btn {
   border-color: #00ff88;
   color: #00ff88;
-  background: rgba(0, 255, 136, 0.05);
-  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-  box-shadow: 0 0 15px rgba(0, 255, 136, 0.1);
+  background: rgba(0, 255, 136, 0.08);
+  text-shadow: 0 0 12px rgba(0, 255, 136, 0.7);
+  box-shadow: 
+    0 0 20px rgba(0, 255, 136, 0.2),
+    inset 0 0 10px rgba(0, 255, 136, 0.05);
 }
 
 .light-btn:hover {
-  background: rgba(0, 255, 136, 0.15);
-  box-shadow: 0 0 25px rgba(0, 255, 136, 0.4);
-  text-shadow: 0 0 15px rgba(0, 255, 136, 0.8);
+  background: rgba(0, 255, 136, 0.2);
+  box-shadow: 
+    0 0 30px rgba(0, 255, 136, 0.5),
+    inset 0 0 15px rgba(0, 255, 136, 0.12),
+    0 0 50px rgba(0, 255, 136, 0.25);
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.95);
 }
 
 /* Active lighting button - highlighted */
 .light-btn.active {
   border-color: #ffff00;
+  border-width: 3px;
   color: #ffff00;
-  background: rgba(255, 255, 0, 0.15);
-  text-shadow: 0 0 15px rgba(255, 255, 0, 0.8);
-  box-shadow: 0 0 30px rgba(255, 255, 0, 0.5), inset 0 0 10px rgba(255, 255, 0, 0.1);
+  background: rgba(255, 255, 0, 0.2);
+  text-shadow: 
+    0 0 20px rgba(255, 255, 0, 0.95),
+    0 0 40px rgba(255, 200, 0, 0.6);
+  box-shadow: 
+    0 0 40px rgba(255, 255, 0, 0.7),
+    0 0 80px rgba(255, 255, 0, 0.3),
+    inset 0 0 15px rgba(255, 255, 0, 0.2);
+  animation: active-pulse 0.5s ease-in-out;
 }
 
 .light-btn.active:hover {
-  box-shadow: 0 0 40px rgba(255, 255, 0, 0.6), inset 0 0 15px rgba(255, 255, 0, 0.2);
+  box-shadow: 
+    0 0 50px rgba(255, 255, 0, 0.85),
+    0 0 100px rgba(255, 255, 0, 0.4),
+    inset 0 0 20px rgba(255, 255, 0, 0.3);
 }
 
 /* Continue button - green accent */
 .continue-btn {
   border-color: #00ff88;
   color: #00ff88;
-  background: rgba(0, 255, 136, 0.08);
-  text-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
-  box-shadow: 0 0 15px rgba(0, 255, 136, 0.15);
+  background: rgba(0, 255, 136, 0.1);
+  text-shadow: 0 0 12px rgba(0, 255, 136, 0.7);
+  box-shadow: 
+    0 0 25px rgba(0, 255, 136, 0.2),
+    inset 0 0 10px rgba(0, 255, 136, 0.08);
 }
 
 .continue-btn:hover {
-  background: rgba(0, 255, 136, 0.2);
-  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
-  text-shadow: 0 0 20px rgba(0, 255, 136, 0.9);
+  background: rgba(0, 255, 136, 0.22);
+  box-shadow: 
+    0 0 40px rgba(0, 255, 136, 0.55),
+    inset 0 0 15px rgba(0, 255, 136, 0.15),
+    0 0 60px rgba(0, 255, 136, 0.25);
+  text-shadow: 0 0 22px rgba(0, 255, 136, 0.95);
 }
 
 /* Restart button - cyan accent */
 .restart-btn {
   border-color: #00d4ff;
   color: #00d4ff;
-  background: rgba(0, 212, 255, 0.08);
-  text-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
-  box-shadow: 0 0 15px rgba(0, 212, 255, 0.15);
+  background: rgba(0, 212, 255, 0.1);
+  text-shadow: 0 0 12px rgba(0, 212, 255, 0.7);
+  box-shadow: 
+    0 0 25px rgba(0, 212, 255, 0.2),
+    inset 0 0 10px rgba(0, 212, 255, 0.08);
 }
 
 .restart-btn:hover {
-  background: rgba(0, 212, 255, 0.2);
-  box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
-  text-shadow: 0 0 20px rgba(0, 212, 255, 0.9);
+  background: rgba(0, 212, 255, 0.22);
+  box-shadow: 
+    0 0 40px rgba(0, 212, 255, 0.55),
+    inset 0 0 15px rgba(0, 212, 255, 0.15),
+    0 0 60px rgba(0, 212, 255, 0.25);
+  text-shadow: 0 0 22px rgba(0, 212, 255, 0.95);
 }
 
 /* Exit button - red accent */
 .exit-btn {
   border-color: #ff2d78;
   color: #ff2d78;
-  background: rgba(255, 45, 120, 0.08);
-  text-shadow: 0 0 10px rgba(255, 45, 120, 0.6);
-  box-shadow: 0 0 15px rgba(255, 45, 120, 0.15);
-  margin-top: 0.5rem; /* Extra spacing before exit */
+  background: rgba(255, 45, 120, 0.1);
+  text-shadow: 0 0 12px rgba(255, 45, 120, 0.7);
+  box-shadow: 
+    0 0 25px rgba(255, 45, 120, 0.2),
+    inset 0 0 10px rgba(255, 45, 120, 0.08);
+  margin-top: 1rem; /* Extra spacing before exit */
 }
 
 .exit-btn:hover {
-  background: rgba(255, 45, 120, 0.2);
-  box-shadow: 0 0 30px rgba(255, 45, 120, 0.5);
-  text-shadow: 0 0 20px rgba(255, 45, 120, 0.9);
+  background: rgba(255, 45, 120, 0.22);
+  box-shadow: 
+    0 0 40px rgba(255, 45, 120, 0.55),
+    inset 0 0 15px rgba(255, 45, 120, 0.15),
+    0 0 60px rgba(255, 45, 120, 0.25);
+  text-shadow: 0 0 22px rgba(255, 45, 120, 0.95);
 }
 
 /* ---------- Controls panel ---------- */
@@ -632,6 +700,40 @@ html, body {
 @keyframes hud-pulse {
   0%, 100% { text-shadow: 0 0 8px #00f5ff, 0 0 16px #00f5ff, 0 0 24px #0088ff; }
   50%      { text-shadow: 0 0 4px #00f5ff, 0 0 8px #00f5ff, 0 0 12px #0088ff; }
+}
+
+@keyframes hud-pulse-enhanced {
+  0%, 100% { 
+    text-shadow: 0 0 12px #00f5ff, 0 0 24px #00f5ff, 0 0 36px #0088ff, 0 0 60px rgba(0, 136, 255, 0.5);
+    box-shadow: inset 0 0 15px rgba(0, 245, 255, 0.15), 0 0 25px rgba(0, 245, 255, 0.4), 0 0 50px rgba(0, 136, 255, 0.2);
+  }
+  50% { 
+    text-shadow: 0 0 6px #00f5ff, 0 0 12px #00f5ff, 0 0 18px #0088ff, 0 0 30px rgba(0, 136, 255, 0.2);
+    box-shadow: inset 0 0 8px rgba(0, 245, 255, 0.1), 0 0 15px rgba(0, 245, 255, 0.2), 0 0 30px rgba(0, 136, 255, 0.1);
+  }
+}
+
+@keyframes records-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3), inset 0 0 15px rgba(0, 255, 136, 0.08), 0 0 40px rgba(0, 255, 136, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.5), inset 0 0 20px rgba(0, 255, 136, 0.15), 0 0 60px rgba(0, 255, 136, 0.25);
+  }
+}
+
+@keyframes value-glow {
+  0%, 100% {
+    text-shadow: 0 0 10px #ffdd00, 0 0 20px rgba(255, 221, 0, 0.7), 0 0 40px rgba(255, 136, 0, 0.4);
+  }
+  50% {
+    text-shadow: 0 0 15px #ffdd00, 0 0 30px rgba(255, 221, 0, 0.9), 0 0 60px rgba(255, 136, 0, 0.6);
+  }
+}
+
+@keyframes icon-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 1; }
 }
 
 /* =====================================================
@@ -847,96 +949,120 @@ html, body {
 /* Records container — displayed in HUD */
 .hud-records {
   position: relative;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: #00ff88;
-  text-shadow: 0 0 4px #00ff88;
-  background: rgba(0, 20, 40, 0.5);
-  padding: 0.7rem 0.9rem;
-  border: 1px solid rgba(0, 255, 136, 0.35);
-  border-radius: 2px;
-  letter-spacing: 0.04em;
-  line-height: 1.5;
-  margin-top: 0.5rem;
+  text-shadow: 0 0 8px #00ff88, 0 0 16px rgba(0, 255, 136, 0.6);
+  background: rgba(0, 30, 60, 0.85);
+  padding: 1rem 1.2rem;
+  border: 2px solid #00ff88;
+  border-radius: 6px;
+  letter-spacing: 0.05em;
+  line-height: 1.8;
+  margin-top: 0.8rem;
+  box-shadow: 
+    0 0 20px rgba(0, 255, 136, 0.3),
+    inset 0 0 15px rgba(0, 255, 136, 0.08),
+    0 0 40px rgba(0, 255, 136, 0.15);
+  animation: records-glow 2.5s ease-in-out infinite;
 }
 
 .hud-records-title {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: bold;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
   color: #00ffff;
-  text-shadow: 0 0 8px #00ffff;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(0, 255, 255, 0.2);
-  padding-bottom: 0.4rem;
+  text-shadow: 0 0 12px #00ffff, 0 0 24px rgba(0, 255, 255, 0.5);
+  margin-bottom: 0.8rem;
+  border-bottom: 2px solid rgba(0, 255, 255, 0.5);
+  padding-bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hud-records-title::before {
+  content: '⚡';
+  animation: icon-pulse 1s ease-in-out infinite;
 }
 
 /* Each record item (Tempo/Ultrapassagens) */
 .record-item {
   display: flex;
   flex-direction: column;
-  margin: 0.5rem 0;
-  padding: 0.4rem;
-  border-left: 2px solid rgba(0, 255, 136, 0.4);
-  padding-left: 0.6rem;
+  margin: 0.7rem 0;
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid #00ff88;
+  padding-left: 0.8rem;
+  background: rgba(0, 255, 136, 0.05);
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.record-item:hover {
+  background: rgba(0, 255, 136, 0.12);
+  border-left-color: #ffdd00;
+  transform: translateX(4px);
 }
 
 .record-label {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: bold;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #00ffff;
-  text-shadow: 0 0 6px #00ffff;
-  margin-bottom: 0.15rem;
+  color: #00d4ff;
+  text-shadow: 0 0 8px #00d4ff, 0 0 16px rgba(0, 212, 255, 0.4);
+  margin-bottom: 0.3rem;
 }
 
 .record-value {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: bold;
   color: #ffdd00;
-  text-shadow: 0 0 8px #ffdd00, 0 0 16px rgba(255, 221, 0, 0.5);
-  letter-spacing: 0.06em;
+  text-shadow: 0 0 10px #ffdd00, 0 0 20px rgba(255, 221, 0, 0.7), 0 0 40px rgba(255, 136, 0, 0.4);
+  letter-spacing: 0.07em;
+  animation: value-glow 1.5s ease-in-out infinite;
 }
 
 .record-date {
-  font-size: 0.6rem;
-  color: rgba(0, 255, 136, 0.7);
+  font-size: 0.65rem;
+  color: rgba(0, 255, 136, 0.8);
   letter-spacing: 0.05em;
-  margin-top: 0.2rem;
+  margin-top: 0.3rem;
   font-style: italic;
+  text-shadow: 0 0 4px rgba(0, 255, 136, 0.4);
 }
 
 /* Reset Records Button — cyberpunk style */
 .reset-btn {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 28px;
-  height: 28px;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  font-size: 0.9rem;
+  font-size: 1rem;
   line-height: 1;
-  background: rgba(255, 45, 120, 0.1);
-  border: 1px solid rgba(255, 45, 120, 0.5);
-  border-radius: 4px;
+  background: rgba(255, 45, 120, 0.15);
+  border: 2px solid #ff2d78;
+  border-radius: 6px;
   color: #ff2d78;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
-  box-shadow: 0 0 8px rgba(255, 45, 120, 0.2);
+  box-shadow: 0 0 12px rgba(255, 45, 120, 0.3), inset 0 0 8px rgba(255, 45, 120, 0.05);
 }
 
 .reset-btn:hover {
-  background: rgba(255, 45, 120, 0.25);
-  box-shadow: 0 0 16px rgba(255, 45, 120, 0.6);
-  transform: scale(1.1);
+  background: rgba(255, 45, 120, 0.35);
+  box-shadow: 0 0 20px rgba(255, 45, 120, 0.8), inset 0 0 12px rgba(255, 45, 120, 0.2);
+  transform: scale(1.15);
 }
 
 .reset-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
 
 /* =====================================================
